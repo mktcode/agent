@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import {
   DirtyWorkingTreeError,
   GitService,
+  InvalidBranchNameError,
   UpstreamNotConfiguredError,
 } from '../src/git-service';
 import {
@@ -124,6 +125,25 @@ describe('GitService.merge', () => {
     expect(status.current).toBe('main');
     await expect(git.revparse('HEAD')).resolves.toBe(mainHeadBefore);
   });
+
+  it('fails immediately when the working tree is dirty', async () => {
+    const environment = await createGitEnvironment(cleanup);
+
+    const git = simpleGit(environment.workspacePath);
+    await git.checkoutLocalBranch('feature');
+    await commitFile(environment.workspacePath, 'feature.txt', 'feature\n', 'Add feature');
+    await git.checkout('main');
+    const headBefore = await git.revparse('HEAD');
+    await writeFile(path.join(environment.workspacePath, 'untracked.txt'), 'dirty', 'utf8');
+
+    const service = new GitService({ workspacePath: environment.workspacePath });
+
+    await expect(service.merge('feature', 'main')).rejects.toBeInstanceOf(DirtyWorkingTreeError);
+
+    const status = await git.status();
+    expect(status.current).toBe('main');
+    await expect(git.revparse('HEAD')).resolves.toBe(headBefore);
+  });
 });
 
 describe('GitService.deleteBranch', () => {
@@ -152,6 +172,20 @@ describe('GitService.deleteBranch', () => {
     await expect(service.deleteBranch('feature')).rejects.toThrow();
     await expect(git.branchLocal()).resolves.toMatchObject({ current: 'feature' });
   });
+
+  it('fails immediately when the working tree is dirty', async () => {
+    const environment = await createGitEnvironment(cleanup);
+
+    const git = simpleGit(environment.workspacePath);
+    await git.checkoutLocalBranch('feature');
+    await git.checkout('main');
+    await writeFile(path.join(environment.workspacePath, 'untracked.txt'), 'dirty', 'utf8');
+
+    const service = new GitService({ workspacePath: environment.workspacePath });
+
+    await expect(service.deleteBranch('feature')).rejects.toBeInstanceOf(DirtyWorkingTreeError);
+    await expect(service.listBranches()).resolves.toEqual(['feature', 'main']);
+  });
 });
 
 describe('GitService.push', () => {
@@ -178,5 +212,61 @@ describe('GitService.push', () => {
     const service = new GitService({ workspacePath: environment.workspacePath });
 
     await expect(service.push('feature')).rejects.toBeInstanceOf(UpstreamNotConfiguredError);
+  });
+
+  it('fails immediately when the working tree is dirty', async () => {
+    const environment = await createGitEnvironment(cleanup);
+
+    const git = simpleGit(environment.workspacePath);
+    const headBefore = await git.revparse('HEAD');
+    await writeFile(path.join(environment.workspacePath, 'untracked.txt'), 'dirty', 'utf8');
+
+    const service = new GitService({ workspacePath: environment.workspacePath });
+
+    await expect(service.push('main')).rejects.toBeInstanceOf(DirtyWorkingTreeError);
+    await expect(git.revparse('HEAD')).resolves.toBe(headBefore);
+  });
+});
+
+describe('GitService branch name validation', () => {
+  it('rejects invalid branch names for checkout', async () => {
+    const environment = await createGitEnvironment(cleanup);
+    const service = new GitService({ workspacePath: environment.workspacePath });
+
+    await expect(service.checkout('invalid..branch')).rejects.toBeInstanceOf(InvalidBranchNameError);
+  });
+
+  it('rejects invalid source branch names for merge', async () => {
+    const environment = await createGitEnvironment(cleanup);
+    const service = new GitService({ workspacePath: environment.workspacePath });
+
+    await expect(service.merge('invalid..branch', 'main')).rejects.toBeInstanceOf(
+      InvalidBranchNameError,
+    );
+  });
+
+  it('rejects invalid target branch names for merge', async () => {
+    const environment = await createGitEnvironment(cleanup);
+    const service = new GitService({ workspacePath: environment.workspacePath });
+
+    await expect(service.merge('main', 'invalid..branch')).rejects.toBeInstanceOf(
+      InvalidBranchNameError,
+    );
+  });
+
+  it('rejects invalid branch names for deleteBranch', async () => {
+    const environment = await createGitEnvironment(cleanup);
+    const service = new GitService({ workspacePath: environment.workspacePath });
+
+    await expect(service.deleteBranch('invalid..branch')).rejects.toBeInstanceOf(
+      InvalidBranchNameError,
+    );
+  });
+
+  it('rejects invalid branch names for push', async () => {
+    const environment = await createGitEnvironment(cleanup);
+    const service = new GitService({ workspacePath: environment.workspacePath });
+
+    await expect(service.push('invalid..branch')).rejects.toBeInstanceOf(InvalidBranchNameError);
   });
 });
