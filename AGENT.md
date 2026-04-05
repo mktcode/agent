@@ -19,4 +19,5 @@ When reasoning about features, think about how you would test them first and sta
 
 - PI Agent README: https://raw.githubusercontent.com/badlogic/pi-mono/refs/heads/main/packages/agent/README.md
 - PI Coding Agent SDK: https://raw.githubusercontent.com/badlogic/pi-mono/refs/heads/main/packages/coding-agent/docs/sdk.md
-- Fastify Reference: https://fastify.dev/docs/latest/Reference/
+- Fastify: https://fastify.dev/docs/latest/Reference/
+- Simple Git: https://raw.githubusercontent.com/steveukx/git-js/refs/heads/main/simple-git/readme.md
