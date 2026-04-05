@@ -1,122 +1,70 @@
-# AGENTS.md
+# Agent Instructions
 
 ## Purpose
 
-This repository is specified via modular documents under `specs/`.
-Each file defines a **strictly bounded subsystem** with clear responsibilities and invariants.
+This repository is specified via modular documents in `specs/`.
 
-You must **treat these specifications as authoritative**. Do not reinterpret, extend, or merge responsibilities across modules.
-
----
-
-## Specification Structure
-
-```
-specs/
-- overview.md
-- workspace-and-locking.md
-- git-service.md
-- agent-runtime.md
-- streaming.md
-- api.md
-- errors-and-results.md
-- testing.md
-```
-
-### How to read
-
-* Start with `overview.md` to understand the system model and constraints
-* Then **only read the module spec you are currently implementing**
-* Consult other specs **only if there is a direct dependency**
-
-Do not preload or combine multiple specs “for context”. This leads to boundary violations.
+You must treat these specifications as **authoritative** and follow them exactly.
 
 ---
 
-## Module Boundaries
+## How to Work with the Specs
 
-Each spec defines:
+1. Start with `specs/overview.md`
+2. Then read **only the module you are implementing**
+3. Read other specs **only if required by dependency**
 
-* Responsibilities (what the module owns)
-* Invariants (what must always hold true)
-* Constraints (what is explicitly disallowed)
+Rules:
+
+* Do not preload multiple specs for context
+* Do not combine responsibilities across modules
+* If multiple specs are needed to understand behavior, you are likely violating boundaries
+
+---
+
+## Implementation Rules
+
+* Implement **one module at a time**
+* Follow the module spec exactly
+* Do not add behavior not explicitly defined
 
 You must not:
 
 * Move logic between modules
 * Duplicate responsibilities
-* Introduce implicit coupling
+* Introduce cross-module coordination
+* Extend or “improve” the design
 
-If something feels ambiguous, resolve it **within the current module’s constraints**, not by expanding scope.
-
----
-
-## Dependency Direction
-
-All modules follow a strict, one-way dependency flow:
-
-```
-API Layer
-   ↓
-Streaming Layer
-   ↓
-Agent Runtime
-   ↓
-Git Service
-   ↓
-Workspace & Lock
-```
-
-Rules:
-
-* Dependencies only flow downward
-* No upward calls
-* No cyclic dependencies
-* Lower layers must not know about higher layers
+**If something is not specified, it is not allowed.**
 
 ---
 
-## Implementation Strategy
+## API Constraint
 
-* Implement **one module at a time**
-* Start from the lowest layer (`workspace-and-locking.md`)
-* Move upward only after the lower layer is complete and tested
+The API layer must only:
 
-At all times:
+* validate input
+* call a single module
+* return a response
 
-* Think in terms of invariants, not features
-* Prefer explicit failure over implicit handling
-* Avoid introducing concurrency beyond what is specified
+It must not contain business logic or orchestration.
+
+---
+
+## Error Handling
+
+* Use only defined error types (`errors-and-results.md`)
+* Do not wrap or reinterpret errors
+* Errors are mapped only at the API boundary
 
 ---
 
 ## Testing
 
-Testing is mandatory and defined in `testing.md`.
-
-Before writing implementation code:
-
-* Identify the smallest testable unit
-* Write a failing test
-* Implement only what is required to pass
-
-Do not:
-
-* Skip integration tests where specified
-* Mock components that are required to be real (e.g. git)
-
----
-
-## Practical Outcome
-
-If implemented correctly:
-
-* Each module is independently testable
-* Failures are localized and explainable
-* The system remains deterministic under all conditions
-* Behavior is fully derived from explicit state, not side effects
-
-If your implementation introduces hidden state, implicit retries, or unclear ownership, it is incorrect.
+* Write a failing test before implementation
+* Use the shared test harness (`testing.md`)
+* Do not mock components that must be real (e.g. git)
+* Do not use nondeterministic behavior
 
 ---
 
@@ -128,4 +76,4 @@ When in doubt:
 * Stay within the module
 * Fail explicitly
 
-Never “improve” the design beyond what is specified.
+Do not deviate from the specifications.
