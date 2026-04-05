@@ -1,5 +1,3 @@
-import { SessionManager, createAgentSession } from '@mariozechner/pi-coding-agent';
-
 import {
   NoActiveSessionError,
   SessionAlreadyExistsError,
@@ -19,6 +17,25 @@ export interface AgentRuntimeSession {
 }
 
 export type CreateAgentRuntimeSession = (cwd: string) => Promise<AgentRuntimeSession>;
+
+interface PiAgentSession {
+  prompt(input: string): Promise<void>;
+  abort(): Promise<void>;
+  dispose(): void;
+  subscribe(listener: (event: unknown) => void): () => void;
+}
+
+interface PiCodingAgentModule {
+  SessionManager: {
+    create(cwd: string): unknown;
+  };
+  createAgentSession(options: {
+    cwd: string;
+    sessionManager: unknown;
+  }): Promise<{
+    session: PiAgentSession;
+  }>;
+}
 
 export interface AgentRuntimeOptions {
   workspace: WorkspaceManager;
@@ -147,6 +164,7 @@ export class AgentRuntime {
 }
 
 async function createPiAgentRuntimeSession(cwd: string): Promise<AgentRuntimeSession> {
+  const { SessionManager, createAgentSession } = await loadPiCodingAgentModule();
   const { session } = await createAgentSession({
     cwd,
     sessionManager: SessionManager.create(cwd),
@@ -158,4 +176,11 @@ async function createPiAgentRuntimeSession(cwd: string): Promise<AgentRuntimeSes
     dispose: () => session.dispose(),
     subscribe: (listener: (event: unknown) => void) => session.subscribe(listener),
   };
+}
+
+function loadPiCodingAgentModule(): Promise<PiCodingAgentModule> {
+  return new Function(
+    'specifier',
+    'return import(specifier);',
+  )('@mariozechner/pi-coding-agent') as Promise<PiCodingAgentModule>;
 }
