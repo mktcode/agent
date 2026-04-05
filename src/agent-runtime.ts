@@ -128,8 +128,12 @@ export class AgentRuntime {
     return this.#state;
   }
 
-  public subscribe(listener: (event: unknown) => void): void {
+  public subscribe(listener: (event: unknown) => void): () => void {
     this.#listeners.add(listener);
+
+    return () => {
+      this.#listeners.delete(listener);
+    };
   }
 
   async #executeTurn(session: AgentRuntimeSession, input: string): Promise<void> {
