@@ -18,8 +18,8 @@ It does not perform HTTP mapping or transport concerns.
 
 This module:
 
-* Defines all domain error types
-* Defines the canonical error structure
+* Defines the shared `AppError` contract used by all domain errors
+* Defines all exported domain error types
 * Ensures consistent error semantics across modules
 
 It must not:
@@ -72,6 +72,19 @@ All modules must throw only:
 ### Git Errors
 
 * `GitOperationError`
+* `DirtyWorkingTreeError`
+* `InvalidBranchNameError`
+* `ActiveBranchDeletionError`
+* `UpstreamNotConfiguredError`
+* `DetachedHeadError`
+
+The module may expose a shared `AppError` base class plus a fixed set of exported subclasses.
+
+Constraints:
+
+* Subclasses must preserve the same `{ code, message, details? }` shape
+* Subclasses must have fixed exported names and stable `code` values
+* No ad-hoc runtime-generated error classes are allowed
 
 ---
 
@@ -109,6 +122,7 @@ Rules:
 * No wrapping or rethrowing with different semantics
 * No string-based errors
 * No partial conversion
+* When unexpected library errors must be attached for diagnostics, they must remain in structured `details`
 
 Flow:
 
@@ -142,7 +156,7 @@ No attempt to recover or reinterpret.
 
 ## Non-Goals
 
-* No error inheritance hierarchy beyond defined types
+* No dynamic error inheritance beyond the fixed exported types
 * No dynamic error generation
 * No logging concerns
 * No retry semantics

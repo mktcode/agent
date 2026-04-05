@@ -200,11 +200,15 @@ All mutating endpoints require the global lock.
 
 ### Agent Endpoints
 
-* `POST /agent/session/start`
+* `POST /agent/start`
   Starts a new agent session with a prompt
   Fails with `409` if another session is active
 
-* `GET /agent/session/stream`
+* `POST /agent/send`
+  Sends input to the active agent session
+  Fails with `409` if the session is already executing a turn
+
+* `GET /agent/stream`
   Streams agent output via SSE
 
 * `DELETE /agent/session`

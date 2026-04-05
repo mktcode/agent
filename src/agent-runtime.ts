@@ -1,6 +1,13 @@
 import { SessionManager, createAgentSession } from '@mariozechner/pi-coding-agent';
 
+import {
+  NoActiveSessionError,
+  SessionAlreadyExistsError,
+  SessionBusyError,
+} from './errors';
 import { WorkspaceManager } from './workspace';
+
+export { NoActiveSessionError, SessionAlreadyExistsError, SessionBusyError } from './errors';
 
 export type AgentRuntimeState = 'idle' | 'ready' | 'running';
 
@@ -17,39 +24,6 @@ export interface AgentRuntimeOptions {
   workspace: WorkspaceManager;
   workspacePath: string;
   createSession?: CreateAgentRuntimeSession;
-}
-
-export class AgentRuntimeError extends Error {
-  public readonly code: string;
-  public override readonly cause?: unknown;
-
-  public constructor(code: string, message: string, cause?: unknown) {
-    super(message);
-    this.name = 'AgentRuntimeError';
-    this.code = code;
-    this.cause = cause;
-  }
-}
-
-export class SessionAlreadyExistsError extends AgentRuntimeError {
-  public constructor() {
-    super('SESSION_ALREADY_EXISTS', 'An agent session already exists.');
-    this.name = 'SessionAlreadyExistsError';
-  }
-}
-
-export class NoActiveSessionError extends AgentRuntimeError {
-  public constructor() {
-    super('NO_ACTIVE_SESSION', 'There is no active agent session.');
-    this.name = 'NoActiveSessionError';
-  }
-}
-
-export class SessionBusyError extends AgentRuntimeError {
-  public constructor() {
-    super('SESSION_BUSY', 'The agent session is already executing a turn.');
-    this.name = 'SessionBusyError';
-  }
 }
 
 export class AgentRuntime {

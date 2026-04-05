@@ -2,19 +2,9 @@ import { access } from 'node:fs/promises';
 
 import { simpleGit } from 'simple-git';
 
-export class LockUnavailableError extends Error {
-  public constructor(message = 'Workspace lock is unavailable.') {
-    super(message);
-    this.name = 'LockUnavailableError';
-  }
-}
+import { InvalidLockStateError, LockUnavailableError } from './errors';
 
-export class InvalidLockStateError extends Error {
-  public constructor(message = 'Workspace lock is not currently held.') {
-    super(message);
-    this.name = 'InvalidLockStateError';
-  }
-}
+export { InvalidLockStateError, LockUnavailableError } from './errors';
 
 export interface WorkspaceManagerOptions {
   repoUrl: string;

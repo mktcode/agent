@@ -1,59 +1,28 @@
 import { simpleGit, type SimpleGit } from 'simple-git';
 
+import {
+  ActiveBranchDeletionError,
+  DetachedHeadError,
+  DirtyWorkingTreeError,
+  GitOperationError,
+  InvalidBranchNameError,
+  UpstreamNotConfiguredError,
+  toErrorDetails,
+} from './errors';
+
+export {
+  ActiveBranchDeletionError,
+  DetachedHeadError,
+  DirtyWorkingTreeError,
+  GitOperationError as GitServiceError,
+  InvalidBranchNameError,
+  UpstreamNotConfiguredError,
+} from './errors';
+
 type ConfigValue = string | string[] | undefined;
 
 export interface GitServiceOptions {
   workspacePath: string;
-}
-
-export class GitServiceError extends Error {
-  public readonly code: string;
-  public override readonly cause?: unknown;
-
-  public constructor(code: string, message: string, cause?: unknown) {
-    super(message);
-    this.name = 'GitServiceError';
-    this.code = code;
-    this.cause = cause;
-  }
-}
-
-export class DirtyWorkingTreeError extends GitServiceError {
-  public constructor() {
-    super('DIRTY_WORKING_TREE', 'Working tree must be clean before mutating git operations.');
-    this.name = 'DirtyWorkingTreeError';
-  }
-}
-
-export class InvalidBranchNameError extends GitServiceError {
-  public constructor(branch: string, cause?: unknown) {
-    super('INVALID_BRANCH_NAME', `Invalid branch name: ${branch}`, cause);
-    this.name = 'InvalidBranchNameError';
-  }
-}
-
-export class ActiveBranchDeletionError extends GitServiceError {
-  public constructor(branch: string) {
-    super('ACTIVE_BRANCH_DELETE', `Cannot delete the currently checked out branch: ${branch}`);
-    this.name = 'ActiveBranchDeletionError';
-  }
-}
-
-export class UpstreamNotConfiguredError extends GitServiceError {
-  public constructor(branch: string) {
-    super(
-      'UPSTREAM_NOT_CONFIGURED',
-      `Branch ${branch} must track origin/${branch} before it can be pushed.`,
-    );
-    this.name = 'UpstreamNotConfiguredError';
-  }
-}
-
-export class DetachedHeadError extends GitServiceError {
-  public constructor() {
-    super('DETACHED_HEAD', 'Repository is in detached HEAD state.');
-    this.name = 'DetachedHeadError';
-  }
 }
 
 export class GitService {
@@ -68,7 +37,9 @@ export class GitService {
       const branchSummary = await this.#git.branchLocal();
       return [...branchSummary.all].sort((left, right) => left.localeCompare(right));
     } catch (error) {
-      throw new GitServiceError('LIST_BRANCHES_FAILED', 'Failed to list local branches.', error);
+      throw new GitOperationError('LIST_BRANCHES_FAILED', 'Failed to list local branches.', {
+        cause: toErrorDetails(error),
+      });
     }
   }
 
@@ -105,20 +76,20 @@ export class GitService {
       const mergeResult = await this.#git.merge([source]);
 
       if (mergeResult.failed) {
-        throw new GitServiceError(
+        throw new GitOperationError(
           'MERGE_FAILED',
           `Failed to merge ${source} into ${target}.`,
-          mergeResult,
+          { mergeResult },
         );
       }
 
       const status = await this.#git.status();
 
       if (!status.isClean()) {
-        throw new GitServiceError(
+        throw new GitOperationError(
           'MERGE_FAILED',
           `Failed to merge ${source} into ${target}.`,
-          status,
+          { status },
         );
       }
 
@@ -239,11 +210,13 @@ export class GitService {
     return value;
   }
 
-  #wrapUnexpectedError(code: string, message: string, error: unknown): GitServiceError {
-    if (error instanceof GitServiceError) {
+  #wrapUnexpectedError(code: string, message: string, error: unknown): GitOperationError {
+    if (error instanceof GitOperationError) {
       return error;
     }
 
-    return new GitServiceError(code, message, error);
+    return new GitOperationError(code, message, {
+      cause: toErrorDetails(error),
+    });
   }
 }
