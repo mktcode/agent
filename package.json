@@ -1,5 +1,16 @@
 {
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit"
+  },
   "dependencies": {
-    "fastify": "^5.8.4"
+    "fastify": "^5.8.4",
+    "simple-git": "^3.28.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.5.2",
+    "typescript": "^5.8.3",
+    "vitest": "^3.2.4"
   }
 }
