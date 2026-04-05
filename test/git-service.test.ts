@@ -1,4 +1,4 @@
-import { readFile, rm, writeFile } from 'node:fs/promises';
+import { readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
 import { simpleGit } from 'simple-git';
@@ -9,24 +9,21 @@ import {
   GitService,
   UpstreamNotConfiguredError,
 } from '../src/git-service';
-import { commitFile, createGitEnvironment } from './helpers/git-repository';
+import {
+  commitFile,
+  createCleanupRegistry,
+  createGitEnvironment,
+} from './harness';
 
-const cleanupTasks: Array<() => Promise<void>> = [];
+const cleanup = createCleanupRegistry();
 
 afterEach(async () => {
-  while (cleanupTasks.length > 0) {
-    const cleanup = cleanupTasks.pop();
-
-    if (cleanup) {
-      await cleanup();
-    }
-  }
+  await cleanup.runAll();
 });
 
 describe('GitService.listBranches', () => {
   it('returns normalized local branch names', async () => {
-    const environment = await createGitEnvironment();
-    cleanupTasks.push(environment.cleanup);
+    const environment = await createGitEnvironment(cleanup);
 
     const git = simpleGit(environment.workspacePath);
     await git.checkoutLocalBranch('feature');
@@ -40,8 +37,7 @@ describe('GitService.listBranches', () => {
 
 describe('GitService.checkout', () => {
   it('checks out an existing branch', async () => {
-    const environment = await createGitEnvironment();
-    cleanupTasks.push(environment.cleanup);
+    const environment = await createGitEnvironment(cleanup);
 
     const git = simpleGit(environment.workspacePath);
     await git.checkoutLocalBranch('feature');
@@ -55,8 +51,7 @@ describe('GitService.checkout', () => {
   });
 
   it('creates and checks out a new branch from HEAD', async () => {
-    const environment = await createGitEnvironment();
-    cleanupTasks.push(environment.cleanup);
+    const environment = await createGitEnvironment(cleanup);
 
     const git = simpleGit(environment.workspacePath);
     const headBefore = await git.revparse('HEAD');
@@ -71,8 +66,7 @@ describe('GitService.checkout', () => {
   });
 
   it('fails immediately when the working tree is dirty', async () => {
-    const environment = await createGitEnvironment();
-    cleanupTasks.push(environment.cleanup);
+    const environment = await createGitEnvironment(cleanup);
 
     await writeFile(path.join(environment.workspacePath, 'untracked.txt'), 'dirty', 'utf8');
 
@@ -86,8 +80,7 @@ describe('GitService.checkout', () => {
 
 describe('GitService.merge', () => {
   it('merges source into target and keeps target checked out', async () => {
-    const environment = await createGitEnvironment();
-    cleanupTasks.push(environment.cleanup);
+    const environment = await createGitEnvironment(cleanup);
 
     const git = simpleGit(environment.workspacePath);
     await git.checkoutLocalBranch('feature');
@@ -109,8 +102,7 @@ describe('GitService.merge', () => {
   });
 
   it('aborts a conflicting merge and leaves the repository clean', async () => {
-    const environment = await createGitEnvironment();
-    cleanupTasks.push(environment.cleanup);
+    const environment = await createGitEnvironment(cleanup);
 
     const git = simpleGit(environment.workspacePath);
     await git.checkoutLocalBranch('feature');
@@ -136,8 +128,7 @@ describe('GitService.merge', () => {
 
 describe('GitService.deleteBranch', () => {
   it('deletes an existing branch', async () => {
-    const environment = await createGitEnvironment();
-    cleanupTasks.push(environment.cleanup);
+    const environment = await createGitEnvironment(cleanup);
 
     const git = simpleGit(environment.workspacePath);
     await git.checkoutLocalBranch('feature');
@@ -151,8 +142,7 @@ describe('GitService.deleteBranch', () => {
   });
 
   it('fails when attempting to delete the current branch', async () => {
-    const environment = await createGitEnvironment();
-    cleanupTasks.push(environment.cleanup);
+    const environment = await createGitEnvironment(cleanup);
 
     const git = simpleGit(environment.workspacePath);
     await git.checkoutLocalBranch('feature');
@@ -166,8 +156,7 @@ describe('GitService.deleteBranch', () => {
 
 describe('GitService.push', () => {
   it('pushes a tracked branch to origin', async () => {
-    const environment = await createGitEnvironment();
-    cleanupTasks.push(environment.cleanup);
+    const environment = await createGitEnvironment(cleanup);
 
     const git = simpleGit(environment.workspacePath);
     const localHead = await commitFile(environment.workspacePath, 'push.txt', 'push\n', 'Push change');
@@ -180,8 +169,7 @@ describe('GitService.push', () => {
   });
 
   it('fails when the branch has no upstream configuration', async () => {
-    const environment = await createGitEnvironment();
-    cleanupTasks.push(environment.cleanup);
+    const environment = await createGitEnvironment(cleanup);
 
     const git = simpleGit(environment.workspacePath);
     await git.checkoutLocalBranch('feature');

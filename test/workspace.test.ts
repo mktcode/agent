@@ -1,39 +1,28 @@
-import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
-import os from 'node:os';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { createGitRepository } from './helpers/git-repository';
+import {
+  createCleanupRegistry,
+  createGitRepository,
+  createTempWorkspacePath,
+} from './harness';
 import {
   InvalidLockStateError,
   LockUnavailableError,
   WorkspaceManager,
 } from '../src/workspace';
 
-const cleanupTasks: Array<() => Promise<void>> = [];
+const cleanup = createCleanupRegistry();
 
 afterEach(async () => {
-  while (cleanupTasks.length > 0) {
-    const cleanup = cleanupTasks.pop();
-
-    if (cleanup) {
-      await cleanup();
-    }
-  }
+  await cleanup.runAll();
 });
-
-async function createTempWorkspacePath(): Promise<string> {
-  const rootPath = await mkdtemp(path.join(os.tmpdir(), 'nextagent-workspace-'));
-  cleanupTasks.push(async () => {
-    await rm(rootPath, { force: true, recursive: true });
-  });
-  return path.join(rootPath, '.workspace');
-}
 
 describe('WorkspaceManager lock semantics', () => {
   it('acquires when unlocked', async () => {
-    const workspacePath = await createTempWorkspacePath();
+    const workspacePath = await createTempWorkspacePath(cleanup);
     const manager = new WorkspaceManager({ repoUrl: '/tmp/unused', workspacePath });
 
     expect(manager.acquire()).toBe(true);
@@ -41,7 +30,7 @@ describe('WorkspaceManager lock semantics', () => {
   });
 
   it('returns false when acquiring while locked', async () => {
-    const workspacePath = await createTempWorkspacePath();
+    const workspacePath = await createTempWorkspacePath(cleanup);
     const manager = new WorkspaceManager({ repoUrl: '/tmp/unused', workspacePath });
 
     expect(manager.acquire()).toBe(true);
@@ -50,7 +39,7 @@ describe('WorkspaceManager lock semantics', () => {
   });
 
   it('releases when locked', async () => {
-    const workspacePath = await createTempWorkspacePath();
+    const workspacePath = await createTempWorkspacePath(cleanup);
     const manager = new WorkspaceManager({ repoUrl: '/tmp/unused', workspacePath });
 
     manager.acquire();
@@ -60,7 +49,7 @@ describe('WorkspaceManager lock semantics', () => {
   });
 
   it('throws when releasing while unlocked', async () => {
-    const workspacePath = await createTempWorkspacePath();
+    const workspacePath = await createTempWorkspacePath(cleanup);
     const manager = new WorkspaceManager({ repoUrl: '/tmp/unused', workspacePath });
 
     expect(() => manager.release()).toThrow(InvalidLockStateError);
@@ -69,14 +58,14 @@ describe('WorkspaceManager lock semantics', () => {
 
 describe('WorkspaceManager.runExclusive', () => {
   it('executes the function when unlocked', async () => {
-    const workspacePath = await createTempWorkspacePath();
+    const workspacePath = await createTempWorkspacePath(cleanup);
     const manager = new WorkspaceManager({ repoUrl: '/tmp/unused', workspacePath });
 
     await expect(manager.runExclusive(async () => 'ok')).resolves.toBe('ok');
   });
 
   it('throws when already locked', async () => {
-    const workspacePath = await createTempWorkspacePath();
+    const workspacePath = await createTempWorkspacePath(cleanup);
     const manager = new WorkspaceManager({ repoUrl: '/tmp/unused', workspacePath });
 
     manager.acquire();
@@ -87,7 +76,7 @@ describe('WorkspaceManager.runExclusive', () => {
   });
 
   it('releases the lock after success', async () => {
-    const workspacePath = await createTempWorkspacePath();
+    const workspacePath = await createTempWorkspacePath(cleanup);
     const manager = new WorkspaceManager({ repoUrl: '/tmp/unused', workspacePath });
 
     await manager.runExclusive(async () => 'ok');
@@ -96,7 +85,7 @@ describe('WorkspaceManager.runExclusive', () => {
   });
 
   it('releases the lock after failure', async () => {
-    const workspacePath = await createTempWorkspacePath();
+    const workspacePath = await createTempWorkspacePath(cleanup);
     const manager = new WorkspaceManager({ repoUrl: '/tmp/unused', workspacePath });
     const failure = new Error('boom');
 
@@ -110,7 +99,7 @@ describe('WorkspaceManager.runExclusive', () => {
   });
 
   it('fails nested runExclusive calls', async () => {
-    const workspacePath = await createTempWorkspacePath();
+    const workspacePath = await createTempWorkspacePath(cleanup);
     const manager = new WorkspaceManager({ repoUrl: '/tmp/unused', workspacePath });
 
     await manager.runExclusive(async () => {
@@ -121,7 +110,7 @@ describe('WorkspaceManager.runExclusive', () => {
   });
 
   it('holds the lock until the async function completes', async () => {
-    const workspacePath = await createTempWorkspacePath();
+    const workspacePath = await createTempWorkspacePath(cleanup);
     const manager = new WorkspaceManager({ repoUrl: '/tmp/unused', workspacePath });
 
     let signalStarted: (() => void) | undefined;
@@ -154,10 +143,9 @@ describe('WorkspaceManager.runExclusive', () => {
 
 describe('WorkspaceManager.initialize', () => {
   it('clones the repository when the workspace does not exist', async () => {
-    const repository = await createGitRepository();
-    cleanupTasks.push(repository.cleanup);
+    const repository = await createGitRepository(cleanup);
 
-    const workspacePath = await createTempWorkspacePath();
+    const workspacePath = await createTempWorkspacePath(cleanup);
     const manager = new WorkspaceManager({
       repoUrl: repository.repoPath,
       workspacePath,
@@ -170,10 +158,9 @@ describe('WorkspaceManager.initialize', () => {
   });
 
   it('does nothing when the workspace already exists', async () => {
-    const repository = await createGitRepository();
-    cleanupTasks.push(repository.cleanup);
+    const repository = await createGitRepository(cleanup);
 
-    const workspacePath = await createTempWorkspacePath();
+    const workspacePath = await createTempWorkspacePath(cleanup);
     await mkdir(workspacePath, { recursive: true });
     await writeFile(path.join(workspacePath, 'marker.txt'), 'keep', 'utf8');
 

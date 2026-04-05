@@ -1,86 +1,7 @@
-import { EventEmitter } from 'node:events';
-
 import { describe, expect, it } from 'vitest';
 
-import {
-  streamAgentEvents,
-  type AgentEventSource,
-  type StreamAgentEventsReply,
-} from '../src/streaming';
-
-class ControlledEventSource implements AgentEventSource {
-  readonly #listeners = new Set<(event: unknown) => void>();
-
-  public emit(event: unknown): void {
-    for (const listener of this.#listeners) {
-      listener(event);
-    }
-  }
-
-  public listenerCount(): number {
-    return this.#listeners.size;
-  }
-
-  public subscribe(listener: (event: unknown) => void): () => void {
-    this.#listeners.add(listener);
-
-    return () => {
-      this.#listeners.delete(listener);
-    };
-  }
-}
-
-class FakeRawResponse extends EventEmitter {
-  public readonly headers = new Map<string, string>();
-  public readonly writes: string[] = [];
-  public statusCode = 0;
-  public destroyed = false;
-  public writableEnded = false;
-  public flushHeadersCalls = 0;
-
-  public setHeader(name: string, value: string): void {
-    this.headers.set(name, value);
-  }
-
-  public flushHeaders(): void {
-    this.flushHeadersCalls += 1;
-  }
-
-  public write(chunk: string): boolean {
-    this.writes.push(chunk);
-    return true;
-  }
-
-  public end(): this {
-    this.writableEnded = true;
-    this.emit('close');
-    return this;
-  }
-
-  public destroy(error?: Error): this {
-    this.destroyed = true;
-
-    if (error) {
-      this.emit('error', error);
-    }
-
-    this.emit('close');
-    return this;
-  }
-}
-
-interface FakeReply extends StreamAgentEventsReply {
-  raw: FakeRawResponse;
-}
-
-function createReply(): FakeReply {
-  return {
-    raw: new FakeRawResponse(),
-    hijack() {
-      return;
-    },
-  };
-}
+import { streamAgentEvents } from '../src/streaming';
+import { ControlledEventSource, assertEventSequence, createReply } from './harness';
 
 describe('streamAgentEvents', () => {
   it('streams events in order as raw SSE data frames', () => {
@@ -100,7 +21,7 @@ describe('streamAgentEvents', () => {
     expect(reply.raw.headers.get('Cache-Control')).toBe('no-cache');
     expect(reply.raw.headers.get('Connection')).toBe('keep-alive');
     expect(reply.raw.flushHeadersCalls).toBe(1);
-    expect(reply.raw.writes).toEqual([
+    assertEventSequence(reply.raw.writes, [
       `data: ${JSON.stringify(firstEvent)}\n\n`,
       `data: ${JSON.stringify(secondEvent)}\n\n`,
     ]);
@@ -120,11 +41,11 @@ describe('streamAgentEvents', () => {
     eventSource.emit(firstEvent);
     eventSource.emit(secondEvent);
 
-    expect(firstReply.raw.writes).toEqual([
+    assertEventSequence(firstReply.raw.writes, [
       `data: ${JSON.stringify(firstEvent)}\n\n`,
       `data: ${JSON.stringify(secondEvent)}\n\n`,
     ]);
-    expect(secondReply.raw.writes).toEqual(firstReply.raw.writes);
+    assertEventSequence(secondReply.raw.writes, firstReply.raw.writes);
   });
 
   it('does not replay events emitted before a client connects', () => {
@@ -142,11 +63,11 @@ describe('streamAgentEvents', () => {
     const afterSecondClient = { type: 'reasoning', text: 'after' };
     eventSource.emit(afterSecondClient);
 
-    expect(firstReply.raw.writes).toEqual([
+    assertEventSequence(firstReply.raw.writes, [
       `data: ${JSON.stringify(beforeSecondClient)}\n\n`,
       `data: ${JSON.stringify(afterSecondClient)}\n\n`,
     ]);
-    expect(secondReply.raw.writes).toEqual([`data: ${JSON.stringify(afterSecondClient)}\n\n`]);
+    assertEventSequence(secondReply.raw.writes, [`data: ${JSON.stringify(afterSecondClient)}\n\n`]);
   });
 
   it('removes the listener when the client disconnects', () => {
