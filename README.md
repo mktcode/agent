@@ -39,6 +39,12 @@ Install dependencies:
 npm install
 ```
 
+Build the server bundle:
+
+```bash
+npm run build
+```
+
 Start the server:
 
 ```bash
@@ -56,6 +62,10 @@ For a lighter development run:
 ```bash
 AUTH_TOKEN=secret-token REPO_URL=/absolute/path/to/repository npm run dev
 ```
+
+`npm start` first builds the server once and then runs plain Node on the generated bundle in `dist/server.js`.
+
+`npm run dev` is the watch-mode workflow. It keeps `tsup` running, rebuilds on source changes, and restarts the bundled server after a successful rebuild.
 
 On first startup, the server clones `REPO_URL` into `.workspace` in the project root. If `.workspace` already exists, it is reused as-is.
 

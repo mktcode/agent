@@ -1,7 +1,5 @@
-import { execFile } from 'node:child_process';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
-import { promisify } from 'node:util';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
@@ -15,7 +13,6 @@ import {
 } from './harness';
 
 const cleanup = createCleanupRegistry();
-const execFileAsync = promisify(execFile);
 
 afterEach(async () => {
   await cleanup.runAll();
@@ -79,16 +76,6 @@ describe('readServerConfig', () => {
 });
 
 describe('buildServer', () => {
-  it('can be loaded through ts-node without eagerly requiring the PI package', async () => {
-    const command = "require('ts-node/register'); require('./src/server.ts'); process.stdout.write('ok\\n');";
-
-    const result = await execFileAsync(process.execPath, ['-e', command], {
-      cwd: path.resolve(__dirname, '..'),
-    });
-
-    expect(result.stdout).toContain('ok');
-  });
-
   it('initializes the workspace before returning the API server', async () => {
     const repository = await createGitRepository(cleanup);
     const workspacePath = await createTempWorkspacePath(cleanup);
