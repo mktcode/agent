@@ -7,12 +7,12 @@ This module orchestrates execution of the **PI Coding Agent** within the system.
 It does **not** implement an agent.
 It acts as a **thin control layer** around the PI agent SDK, responsible only for:
 
-* Session lifecycle management (single session)
-* Workspace lock ownership
-* Binding the agent to `./.workspace`
+* Managing a single multi-turn session
+* Executing individual turns
+* Owning the workspace lock during execution
 * Forwarding agent events
 
-All agent logic (reasoning, tool usage, state, persistence) is handled by the PI agent itself.
+All agent logic (reasoning, tools, memory, persistence) is handled entirely by the PI agent.
 
 ---
 
@@ -31,16 +31,16 @@ The PI agent must be treated as a **black box**.
 
 The module owns:
 
-* A single active agent session (global)
-* Starting and stopping execution
-* Subscribing to agent events and forwarding them
-* Holding the workspace lock for the duration of execution
+* A single active session (multi-turn)
+* Triggering agent execution per turn
+* Holding the workspace lock during execution only
+* Forwarding agent events transparently
 
 It must not:
 
-* Implement agent logic
-* Modify tool definitions
-* Interpret or persist agent state
+* Implement agent behavior
+* Modify or inject tools
+* Interpret or transform agent events
 * Manage multiple sessions
 
 ---
@@ -49,12 +49,15 @@ It must not:
 
 There is exactly **one session slot**.
 
-State is minimal:
+Session states:
 
-* `idle` – no session running
-* `running` – agent is executing
+* `idle` – no session exists
+* `ready` – session exists, waiting for input
+* `running` – agent is executing a turn
 
-No additional states, no session collection.
+### Invariant
+
+> A session persists across turns, but only one turn executes at a time.
 
 ---
 
@@ -62,60 +65,93 @@ No additional states, no session collection.
 
 ### `start(prompt: string): Promise<void>`
 
-Starts a new agent session.
+Creates a new session and executes the first turn.
 
 Behavior:
 
-1. If a session is already running → throw `SessionAlreadyRunningError`
-2. Acquire workspace lock via `runExclusive`
-3. Initialize PI agent session using SDK
-4. Bind agent to `./.workspace` as working directory
-5. Start execution with provided prompt
-6. Attach event listeners
-7. Transition state → `running`
+1. If a session already exists → throw `SessionAlreadyExistsError`
+2. Initialize PI agent session via SDK
+3. Bind agent to `./.workspace`
+4. Execute first turn with `prompt`
+5. Transition state → `running`
 
-Failure behavior:
+Execution must follow the same rules as `send()`.
 
-* If lock cannot be acquired → fail immediately
-* If agent initialization fails → release lock and fail
+---
+
+### `send(input: string): Promise<void>`
+
+Executes a new turn in the existing session.
+
+Behavior:
+
+1. If no session exists → throw `NoActiveSessionError`
+2. If a turn is already running → throw `SessionBusyError`
+3. Acquire workspace lock via `runExclusive`
+4. Send input to agent via SDK
+5. Stream events during execution
+6. On completion → transition state → `ready`
+7. Release lock
 
 ---
 
 ### `stop(): Promise<void>`
 
-Stops the active session.
+Terminates the session.
 
 Behavior:
 
-* If no session is running → no-op
-* If running:
+* If no session exists → no-op
+* If a turn is running:
 
-  * Signal cancellation via SDK (preferred)
-  * Wait for agent to terminate
-  * Ensure final event is emitted (`done` or `error`)
-  * Release workspace lock
-  * Transition state → `idle`
+  * Signal cancellation via SDK
+  * Wait for execution to terminate
 
-Constraints:
+After termination:
 
-* Must not leave lock held
-* Must not terminate abruptly without cleanup
+* Release lock if held
+* Destroy session
+* Transition state → `idle`
 
 ---
 
-### `getState(): "idle" | "running"`
+### `getState(): "idle" | "ready" | "running"`
 
 Returns current session state.
 
 ---
 
-### `subscribe(listener: (event) => void): void`
+### `subscribe(listener: (event: unknown) => void): void`
 
 Registers a listener for agent events.
 
 * Multiple listeners allowed
 * No buffering or replay
-* Listener receives events in real time
+* Events delivered in real time
+
+---
+
+## Execution Model
+
+Execution is **turn-based**.
+
+Each turn:
+
+* Is triggered explicitly (`start` or `send`)
+* Runs to completion or failure
+* Holds the workspace lock for its full duration
+
+### Locking Rule
+
+> The workspace lock is held only during active execution of a turn.
+
+* Lock is acquired before execution
+* Lock is released immediately after execution completes
+
+Between turns:
+
+* No lock is held
+* Git operations are allowed
 
 ---
 
@@ -125,109 +161,96 @@ The agent must execute with:
 
 * `./.workspace` as its working directory
 
-This ensures:
+This ensures all file and tool operations are properly scoped.
 
-* File tools operate within the repository
-* Bash/tool execution is scoped correctly
-
-The runtime must not allow access outside this directory.
+Access outside this directory is not allowed.
 
 ---
 
 ## Event Handling
 
-The runtime subscribes to PI agent events and forwards them unchanged.
-
-### Event Format
-
-Events must be normalized to:
-
-```json
-{
-  "type": "reasoning | action | result | error | done",
-  "payload": {}
-}
-```
+The runtime must forward PI agent events **unchanged**.
 
 Constraints:
 
-* Events are emitted in strict order
-* No batching
-* No transformation beyond minimal normalization
-* No filtering
+* No transformation of event structure
+* No filtering or aggregation
+* No reordering
+* No buffering or replay
 
----
-
-## Execution Model
-
-* Agent runs as an async process via the SDK
-* No subprocess management unless required by SDK
-* No parallel sessions
-
-### Lock Ownership
-
-> While a session is running, it exclusively owns the workspace lock.
-
-* Lock is acquired before agent starts
-* Lock is released only after termination
-
-No partial or temporary release is allowed.
+Events are treated as opaque data and passed directly to subscribers.
 
 ---
 
 ## Failure Handling
 
-If the agent fails:
+If a turn fails:
 
-* Emit `error` event
-* Terminate session
-* Release lock
-* Transition state → `idle`
+* The failure is reflected via agent-emitted events
+* The runtime must:
 
-No retries, no restarts.
+  * Release the workspace lock
+  * Transition state → `ready`
+
+The session remains active and may continue with further turns.
+
+No retries or recovery logic.
+
+---
+
+## Cancellation
+
+When `stop()` is called during execution:
+
+* The agent must be cancelled via SDK mechanism
+* Execution must terminate cleanly
+* Lock must be released
+* State must transition to `idle`
+
+No abrupt termination without cleanup.
 
 ---
 
 ## Session Persistence
 
-* The PI agent may persist session data internally (e.g. logs)
-* This module does not manage or interpret that data
+* Session memory and logs are managed by the PI agent
+* This module does not access or interpret them
 
-The runtime only manages **live execution state**.
+The runtime manages only **live execution state**.
 
 ---
 
 ## Non-Goals
 
-* No multi-session support
-* No session resume
-* No session history querying
+* No multiple sessions
+* No session resume after process restart
+* No history querying
 * No tool injection or modification
-* No custom agent behavior
+* No parallel execution
 
 ---
 
 ## Testing Requirements
 
-Use a **stub or controlled agent implementation** for deterministic tests.
+Use a stubbed or controlled agent implementation.
 
 ### Required Cases
 
-* Start when idle → succeeds
-* Start when running → fails
+* Start creates session and runs first turn
+* Send executes additional turns
+* Send while running → fails
 * Lock is held during execution
-* Lock is released after completion
+* Lock is released after each turn
 * Stop terminates session
-* Stop releases lock
-* Agent error → handled correctly
+* Error in turn → session remains usable
 
-### Event Handling
+### Event Behavior
 
-* Events are emitted in correct order
-* No events after `done`
-* Subscribers receive all events
+* Events are forwarded exactly as emitted
+* Event order is preserved
+* No events after termination
 
-Tests must not depend on real LLM behavior.
+Tests must be deterministic and independent of real LLM behavior.
 
 ---
 
@@ -235,6 +258,6 @@ Tests must not depend on real LLM behavior.
 
 At all times:
 
-> At most one agent session exists, it exclusively owns the workspace during execution, and all agent behavior is delegated to the PI SDK without modification.
+> There is at most one session, it executes one turn at a time under exclusive workspace access, and all agent behavior and events are delegated to the PI SDK without modification.
 
 Any additional logic beyond orchestration violates this module’s contract.
