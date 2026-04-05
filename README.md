@@ -1,0 +1,143 @@
+# Agent API Server
+
+This service exposes a small authenticated HTTP API for managing a single repository workspace and running the coding agent against it.
+
+## Requirements
+
+- Node.js
+- npm
+- A repository URL or local repository path for `REPO_URL`
+
+## Configuration
+
+The server reads configuration from environment variables.
+
+Required:
+
+- `AUTH_TOKEN`: bearer token required on every request
+- `REPO_URL`: repository URL or local repository path to clone into `.workspace`
+
+Optional:
+
+- `HOST`: defaults to `127.0.0.1`
+- `PORT`: defaults to `3000`
+
+Example:
+
+```bash
+AUTH_TOKEN=secret-token
+REPO_URL=/absolute/path/to/repository
+HOST=127.0.0.1
+PORT=3000
+```
+
+## Start
+
+Install dependencies:
+
+```bash
+npm install
+```
+
+Start the server:
+
+```bash
+AUTH_TOKEN=secret-token REPO_URL=/absolute/path/to/repository npm start
+```
+
+Or with explicit host and port:
+
+```bash
+HOST=127.0.0.1 PORT=3000 AUTH_TOKEN=secret-token REPO_URL=/absolute/path/to/repository npm start
+```
+
+For a lighter development run:
+
+```bash
+AUTH_TOKEN=secret-token REPO_URL=/absolute/path/to/repository npm run dev
+```
+
+On first startup, the server clones `REPO_URL` into `.workspace` in the project root. If `.workspace` already exists, it is reused as-is.
+
+## API Examples
+
+All requests require:
+
+```bash
+-H 'Authorization: Bearer secret-token'
+```
+
+List branches:
+
+```bash
+curl http://127.0.0.1:3000/git/branches \
+  -H 'Authorization: Bearer secret-token'
+```
+
+Create or switch to a branch:
+
+```bash
+curl -X POST http://127.0.0.1:3000/git/checkout \
+  -H 'Authorization: Bearer secret-token' \
+  -H 'Content-Type: application/json' \
+  -d '{"branch":"feature-x"}'
+```
+
+Merge one branch into another:
+
+```bash
+curl -X POST http://127.0.0.1:3000/git/merge \
+  -H 'Authorization: Bearer secret-token' \
+  -H 'Content-Type: application/json' \
+  -d '{"source":"feature-x","target":"main"}'
+```
+
+Push a branch:
+
+```bash
+curl -X POST http://127.0.0.1:3000/git/push \
+  -H 'Authorization: Bearer secret-token' \
+  -H 'Content-Type: application/json' \
+  -d '{"branch":"main"}'
+```
+
+Delete a branch:
+
+```bash
+curl -X DELETE http://127.0.0.1:3000/git/branch \
+  -H 'Authorization: Bearer secret-token' \
+  -H 'Content-Type: application/json' \
+  -d '{"branch":"feature-x"}'
+```
+
+Start an agent session:
+
+```bash
+curl -X POST http://127.0.0.1:3000/agent/start \
+  -H 'Authorization: Bearer secret-token' \
+  -H 'Content-Type: application/json' \
+  -d '{"prompt":"Implement the missing API layer."}'
+```
+
+Send another turn to the active session:
+
+```bash
+curl -X POST http://127.0.0.1:3000/agent/send \
+  -H 'Authorization: Bearer secret-token' \
+  -H 'Content-Type: application/json' \
+  -d '{"input":"Now add tests."}'
+```
+
+Stop the active session:
+
+```bash
+curl -X DELETE http://127.0.0.1:3000/agent/session \
+  -H 'Authorization: Bearer secret-token'
+```
+
+Open the SSE event stream:
+
+```bash
+curl -N http://127.0.0.1:3000/agent/stream \
+  -H 'Authorization: Bearer secret-token'
+```
