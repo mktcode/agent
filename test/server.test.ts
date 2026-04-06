@@ -1,5 +1,7 @@
+import { execFile } from 'node:child_process';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
+import { promisify } from 'node:util';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
@@ -11,6 +13,8 @@ import {
   createTempDirectory,
   createTempWorkspacePath,
 } from './harness';
+
+const execFileAsync = promisify(execFile);
 
 const cleanup = createCleanupRegistry();
 
@@ -116,5 +120,26 @@ describe('startServer', () => {
     });
 
     expect(server.server.listening).toBe(true);
+  });
+});
+
+describe('production bundle', () => {
+  it('loads the built server entrypoint before config validation runs', async () => {
+    const npmCommand = process.platform === 'win32' ? 'npm.cmd' : 'npm';
+
+    await execFileAsync(npmCommand, ['run', 'build'], {
+      cwd: process.cwd(),
+      env: process.env,
+    });
+
+    await expect(
+      execFileAsync(process.execPath, ['dist/server.mjs'], {
+        cwd: process.cwd(),
+        env: {},
+      }),
+    ).rejects.toMatchObject({
+      code: 1,
+      stderr: 'AUTH_TOKEN is required.\n',
+    });
   });
 });

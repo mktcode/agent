@@ -2,8 +2,8 @@
   "scripts": {
     "build": "tsup",
     "prestart": "npm run build",
-    "start": "node dist/server.js",
-    "dev": "tsup --watch src --onSuccess \"node dist/server.js\"",
+    "start": "node dist/server.mjs",
+    "dev": "tsup --watch src --onSuccess \"node dist/server.mjs\"",
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit"

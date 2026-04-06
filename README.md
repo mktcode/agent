@@ -63,7 +63,7 @@ For a lighter development run:
 AUTH_TOKEN=secret-token REPO_URL=/absolute/path/to/repository npm run dev
 ```
 
-`npm start` first builds the server once and then runs plain Node on the generated bundle in `dist/server.js`.
+`npm start` first builds the server once and then runs plain Node on the generated bundle in `dist/server.mjs`.
 
 `npm run dev` is the watch-mode workflow. It watches `src/`, rebuilds on source changes, and restarts the bundled server after a successful rebuild.
 

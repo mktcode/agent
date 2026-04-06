@@ -1,4 +1,5 @@
 import path from 'node:path';
+import { pathToFileURL } from 'node:url';
 
 import type { FastifyInstance } from 'fastify';
 
@@ -104,7 +105,17 @@ function readPort(value: string | undefined): number {
   return port;
 }
 
-if (require.main === module) {
+function isMainModule(): boolean {
+  const entryPath = process.argv[1];
+
+  if (typeof entryPath !== 'string' || entryPath.length === 0) {
+    return false;
+  }
+
+  return import.meta.url === pathToFileURL(path.resolve(entryPath)).href;
+}
+
+if (isMainModule()) {
   main().catch((error: unknown) => {
     if (error instanceof Error) {
       process.stderr.write(`${error.message}\n`);
