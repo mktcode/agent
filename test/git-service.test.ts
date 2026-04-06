@@ -192,7 +192,6 @@ describe('GitService.push', () => {
   it('pushes a tracked branch to origin', async () => {
     const environment = await createGitEnvironment(cleanup);
 
-    const git = simpleGit(environment.workspacePath);
     const localHead = await commitFile(environment.workspacePath, 'push.txt', 'push\n', 'Push change');
     const service = new GitService({ workspacePath: environment.workspacePath });
 
@@ -205,8 +204,7 @@ describe('GitService.push', () => {
   it('fails when the branch has no upstream configuration', async () => {
     const environment = await createGitEnvironment(cleanup);
 
-    const git = simpleGit(environment.workspacePath);
-    await git.checkoutLocalBranch('feature');
+    await simpleGit(environment.workspacePath).checkoutLocalBranch('feature');
     await commitFile(environment.workspacePath, 'feature.txt', 'feature\n', 'Feature commit');
 
     const service = new GitService({ workspacePath: environment.workspacePath });

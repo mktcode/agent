@@ -19,13 +19,6 @@ export interface AgentRuntimeSession {
 
 export type CreateAgentRuntimeSession = (cwd: string) => Promise<AgentRuntimeSession>;
 
-interface PiAgentSession {
-  prompt(input: string): Promise<void>;
-  abort(): Promise<void>;
-  dispose(): void;
-  subscribe(listener: (event: unknown) => void): () => void;
-}
-
 export interface AgentRuntimeOptions {
   workspace: WorkspaceManager;
   workspacePath: string;

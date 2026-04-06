@@ -1,4 +1,4 @@
-import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from 'fastify';
+import Fastify, { type FastifyInstance, type FastifyRequest } from 'fastify';
 
 import { type AgentRuntime } from './agent-runtime';
 import { AppError, LockUnavailableError, ValidationError } from './errors';
