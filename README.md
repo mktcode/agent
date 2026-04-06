@@ -21,6 +21,8 @@ Optional:
 
 - `HOST`: defaults to `127.0.0.1`
 - `PORT`: defaults to `3000`
+- `MODEL_PROVIDER`: defaults to `openai`
+- `MODEL_NAME`: defaults to `gpt-5.4-mini`
 
 Example:
 
@@ -29,6 +31,8 @@ AUTH_TOKEN=secret-token
 REPO_URL=/absolute/path/to/repository
 HOST=127.0.0.1
 PORT=3000
+MODEL_PROVIDER=anthropic
+MODEL_NAME=claude-opus-4-6
 ```
 
 ## Start
