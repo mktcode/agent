@@ -54,8 +54,6 @@ Dependency direction is one-way:
 ```text
 API Layer
    ↓
-Streaming Layer
-   ↓
 Agent Runtime
    ↓
 Git Service
@@ -70,7 +68,6 @@ Each module owns a well-defined responsibility and must not leak concerns across
 * Workspace & Locking → `specs/workspace-and-locking.md`
 * Git Service → `specs/git-service.md`
 * Agent Runtime → `specs/agent-runtime.md`
-* Streaming Layer → `specs/streaming.md`
 * API Layer → `specs/api.md`
 * Errors & Results → `specs/errors-and-results.md`
 * Testing → `specs/testing.md`

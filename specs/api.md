@@ -4,9 +4,9 @@
 
 This module exposes the system via HTTP.
 
-It is a **thin transport and validation layer** that maps HTTP requests to underlying modules.
+It is the system's **HTTP transport boundary**, responsible for request validation, response mapping, and SSE delivery for agent execution.
 
-It must not contain business logic, state management, or orchestration.
+It must not contain business logic, lock management, or session persistence logic.
 
 ---
 
@@ -18,12 +18,13 @@ The API layer:
 * Validates input
 * Calls the appropriate module
 * Maps results and errors to HTTP responses
+* Streams agent events over SSE for prompt requests
 
 It must not:
 
 * Implement domain logic
 * Manage locks
-* Coordinate multiple modules beyond direct delegation
+* Interpret agent events
 * Modify behavior of underlying modules
 
 ---
@@ -203,11 +204,11 @@ Request:
 
 Behavior:
 
-* Calls the streaming layer
+* Calls `agentRuntime.prompt`
 * If `sessionId` is omitted, the runtime creates a new persistent PI session
 * If `sessionId` is provided, the runtime resumes that persistent PI session
 * Executes one agent turn for `prompt`
-* Streams live agent events on the same HTTP response
+* Subscribes to runtime events and streams live events on the same HTTP response
 
 Success response headers:
 
@@ -251,7 +252,7 @@ data: <JSON serialized event>
 ## Execution Rules
 
 * Each request must call exactly one module
-* No chaining of operations
+* `POST /agent/prompt` may subscribe to runtime events and await turn completion while building the HTTP response
 * No retries or fallback logic
 
 ---
@@ -261,7 +262,8 @@ data: <JSON serialized event>
 * `POST /agent/prompt` is the only agent endpoint
 * Session creation versus resume is handled entirely inside the agent runtime
 * The API layer treats `sessionId` as opaque input/output data
-* The API layer does not subscribe to agent events directly
+* The API layer forwards agent events unchanged
+* Client disconnects must not cancel the active turn
 
 ---
 
@@ -281,6 +283,8 @@ data: <JSON serialized event>
 * Input validation
 * Error mapping correctness
 * Endpoint-to-module delegation
+* SSE header and frame formatting for prompt requests
+* Disconnect cleanup without turn cancellation
 
 ### Integration
 
@@ -295,6 +299,6 @@ Tests must be deterministic and isolated.
 
 At all times:
 
-> The API layer is a thin, deterministic mapping from HTTP requests to module calls, with no additional logic or side effects.
+> The API layer deterministically maps HTTP requests to module calls, and for prompt requests it forwards runtime events over SSE without modifying execution semantics.
 
 Any logic beyond validation and delegation violates this module’s contract.

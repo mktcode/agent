@@ -10,7 +10,7 @@ It acts as a **thin control layer** around the PI agent SDK, responsible only fo
 * Managing persistent PI sessions identified by session ID
 * Executing individual turns
 * Owning the workspace lock during execution
-* Forwarding agent events
+* Forwarding agent events to subscribers
 
 All agent logic (reasoning, tools, memory, persistence) is handled entirely by the PI agent.
 
@@ -221,6 +221,8 @@ No abrupt termination without cleanup.
 * This module must not define a second session storage format or duplicate session history
 
 The runtime manages only **live execution state** plus selection of which persisted PI session to load for a turn.
+
+Transport disconnects do not alter runtime execution state.
 
 ---
 

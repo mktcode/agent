@@ -88,6 +88,7 @@ Provide helpers to:
 * Capture event streams
 * Assert event order
 * Assert streamed response headers
+* Assert disconnect cleanup behavior
 * Assert completion (`done` / `error`)
 
 ---
