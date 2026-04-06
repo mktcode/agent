@@ -21,7 +21,7 @@ Optional:
 
 - `HOST`: defaults to `127.0.0.1`
 - `PORT`: defaults to `3000`
-- `MODEL_PROVIDER`: defaults to `openai`
+- `MODEL_PROVIDER`: defaults to `openai` ([Pi docs](https://github.com/badlogic/pi-mono/blob/main/packages/coding-agent/docs/providers.md))
 - `MODEL_NAME`: defaults to `gpt-5.4-mini`
 
 Example:
@@ -37,39 +37,17 @@ MODEL_NAME=claude-opus-4-6
 
 ## Start
 
-Install dependencies:
-
 ```bash
 npm install
-```
-
-Build the server bundle:
-
-```bash
 npm run build
-```
+npm start
 
-Start the server:
-
-```bash
-AUTH_TOKEN=secret-token REPO_URL=/absolute/path/to/repository npm start
-```
-
-Or with explicit host and port:
-
-```bash
+# Or with explicit env vars:
 HOST=127.0.0.1 PORT=3000 AUTH_TOKEN=secret-token REPO_URL=/absolute/path/to/repository npm start
+
+# Watche files in `src/`,
+npm run dev
 ```
-
-For a lighter development run:
-
-```bash
-AUTH_TOKEN=secret-token REPO_URL=/absolute/path/to/repository npm run dev
-```
-
-`npm start` first builds the server once and then runs plain Node on the generated bundle in `dist/server.mjs`.
-
-`npm run dev` is the watch-mode workflow. It watches `src/`, rebuilds on source changes, and restarts the bundled server after a successful rebuild.
 
 On first startup, the server clones `REPO_URL` into `.workspace` in the project root. If `.workspace` already exists, it is reused as-is.
 
@@ -144,6 +122,6 @@ curl -N -X POST http://127.0.0.1:3000/agent/prompt \
   -d '{"prompt":"Now add tests.","sessionId":"<session-id>"}'
 ```
 
-Successful prompt responses use SSE and include the effective session ID in the `X-Agent-Session-Id` response header.
+Successful prompt responses include the effective session ID in the `X-Agent-Session-Id` response header.
 
 If the client disconnects while a prompt is running, the agent turn continues to completion.

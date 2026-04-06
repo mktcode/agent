@@ -1,7 +1,6 @@
 {
   "scripts": {
     "build": "tsup",
-    "prestart": "npm run build",
     "start": "node dist/server.mjs",
     "dev": "tsup --watch src --onSuccess \"node dist/server.mjs\"",
     "test": "vitest run",
