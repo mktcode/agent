@@ -55,7 +55,7 @@ export class AgentRuntime {
   public constructor(options: AgentRuntimeOptions) {
     this.#workspace = options.workspace;
     this.#workspacePath = options.workspacePath;
-    this.#sessionStoragePath = path.join(options.workspacePath, '.pi', 'sessions');
+    this.#sessionStoragePath = path.join(path.dirname(options.workspacePath), '.pi', 'sessions');
     this.#createSession = options.createSession ?? createPiAgentRuntimeSession;
   }
 

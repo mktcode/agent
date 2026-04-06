@@ -69,6 +69,8 @@ AUTH_TOKEN=secret-token REPO_URL=/absolute/path/to/repository npm run dev
 
 On first startup, the server clones `REPO_URL` into `.workspace` in the project root. If `.workspace` already exists, it is reused as-is.
 
+PI agent sessions are stored separately in `.pi/sessions` in the project root.
+
 ## API Examples
 
 All requests require:
@@ -139,3 +141,5 @@ curl -N -X POST http://127.0.0.1:3000/agent/prompt \
 ```
 
 Successful prompt responses use SSE and include the effective session ID in the `X-Agent-Session-Id` response header.
+
+If the client disconnects while a prompt is running, the agent turn continues to completion.

@@ -2,13 +2,13 @@ import type { FastifyInstance } from 'fastify';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { createApiServer } from '../src/api';
+import { createApiServer, streamAgentPromptResponse } from '../src/api';
 import {
   LockUnavailableError,
   SessionNotFoundError,
   ValidationError,
 } from '../src/errors';
-import type { StreamAgentPromptOptions } from '../src/streaming';
+import { ControlledEventSource, assertEventSequence, createDeferred, createReply } from './harness';
 
 interface GitServiceStub {
   listBranches: ReturnType<typeof vi.fn>;
@@ -20,7 +20,6 @@ interface GitServiceStub {
 
 interface AgentRuntimeStub {
   prompt: ReturnType<typeof vi.fn>;
-  stop: ReturnType<typeof vi.fn>;
   subscribe: ReturnType<typeof vi.fn>;
 }
 
@@ -42,28 +41,18 @@ function createServer() {
   };
   const agentRuntime: AgentRuntimeStub = {
     prompt: vi.fn(async () => ({ sessionId: 'session-1', completion: Promise.resolve() })),
-    stop: vi.fn(async () => undefined),
     subscribe: vi.fn(() => () => undefined),
   };
-  const streamAgentPrompt = vi.fn((options: StreamAgentPromptOptions) => {
-    const raw = options.reply.raw as StreamAgentPromptOptions['reply']['raw'] & { end(): void };
-
-    options.reply.hijack();
-    raw.statusCode = 200;
-    raw.setHeader('X-Agent-Session-Id', 'session-1');
-    raw.end();
-  });
 
   const server = createApiServer({
     authToken: 'secret-token',
     gitService,
     agentRuntime,
-    streamAgentPrompt,
   });
 
   servers.push(server);
 
-  return { server, gitService, agentRuntime, streamAgentPrompt };
+  return { server, gitService, agentRuntime };
 }
 
 function authorizedHeaders() {
@@ -92,7 +81,7 @@ describe('API authentication', () => {
   });
 
   it('rejects requests with an invalid bearer token', async () => {
-    const { server, streamAgentPrompt } = createServer();
+    const { server, agentRuntime } = createServer();
 
     const response = await server.inject({
       method: 'POST',
@@ -112,7 +101,7 @@ describe('API authentication', () => {
         message: 'Unauthorized.',
       },
     });
-    expect(streamAgentPrompt).not.toHaveBeenCalled();
+    expect(agentRuntime.prompt).not.toHaveBeenCalled();
   });
 });
 
@@ -167,7 +156,7 @@ describe('API validation', () => {
   });
 
   it('accepts an optional string session id for prompt requests', async () => {
-    const { server, streamAgentPrompt } = createServer();
+    const { server, agentRuntime } = createServer();
 
     const response = await server.inject({
       method: 'POST',
@@ -180,12 +169,7 @@ describe('API validation', () => {
     });
 
     expect(response.statusCode).toBe(200);
-    expect(streamAgentPrompt).toHaveBeenCalledWith(
-      expect.objectContaining({
-        prompt: 'Continue',
-        sessionId: 'session-123',
-      }),
-    );
+    expect(agentRuntime.prompt).toHaveBeenCalledWith('Continue', 'session-123');
   });
 });
 
@@ -225,8 +209,8 @@ describe('API delegation', () => {
     expect(gitService.merge).toHaveBeenCalledWith('feature', 'main');
   });
 
-  it('delegates agent prompts directly to the streaming layer', async () => {
-    const { server, agentRuntime, streamAgentPrompt } = createServer();
+  it('delegates agent prompts directly to the runtime and returns SSE headers', async () => {
+    const { server, agentRuntime } = createServer();
 
     const response = await server.inject({
       method: 'POST',
@@ -239,14 +223,9 @@ describe('API delegation', () => {
     });
 
     expect(response.statusCode).toBe(200);
-    expect(streamAgentPrompt).toHaveBeenCalledTimes(1);
-    expect(streamAgentPrompt.mock.calls[0]?.[0]).toEqual(
-      expect.objectContaining({
-        agentRuntime,
-        prompt: 'Implement the feature',
-        sessionId: 'session-9',
-      }),
-    );
+    expect(response.headers['content-type']).toContain('text/event-stream');
+    expect(response.headers['x-agent-session-id']).toBe('session-1');
+    expect(agentRuntime.prompt).toHaveBeenCalledWith('Implement the feature', 'session-9');
   });
 });
 
@@ -275,9 +254,9 @@ describe('API error mapping', () => {
   });
 
   it('maps known domain errors to 400 bad request', async () => {
-    const { server, streamAgentPrompt } = createServer();
+    const { server, agentRuntime } = createServer();
 
-    streamAgentPrompt.mockRejectedValueOnce(new SessionNotFoundError());
+    agentRuntime.prompt.mockRejectedValueOnce(new SessionNotFoundError());
 
     const response = await server.inject({
       method: 'POST',
@@ -296,6 +275,129 @@ describe('API error mapping', () => {
         message: 'The requested agent session was not found.',
       },
     });
+  });
+
+  it('streams prompt events unchanged and in order', async () => {
+    const eventSource = new ControlledEventSource();
+    const reply = createReply();
+    const completion = createDeferred<void>();
+    const agentRuntime = {
+      subscribe: vi.fn((listener: (event: unknown) => void) => eventSource.subscribe(listener)),
+      prompt: vi.fn(async (prompt: string, sessionId?: string) => ({
+        sessionId: sessionId ?? 'session-1',
+        completion: completion.promise,
+      })),
+    };
+
+    const streamPromise = streamAgentPromptResponse({
+      agentRuntime,
+      prompt: 'Implement the feature',
+      reply,
+    });
+
+    const firstEvent = { type: 'reasoning', text: 'first' };
+    const secondEvent = { type: 'result', ok: true };
+
+    eventSource.emit(firstEvent);
+    eventSource.emit(secondEvent);
+    completion.resolve();
+
+    await streamPromise;
+
+    expect(agentRuntime.prompt).toHaveBeenCalledWith('Implement the feature', undefined);
+    expect(reply.raw.statusCode).toBe(200);
+    expect(reply.raw.headers.get('Content-Type')).toBe('text/event-stream; charset=utf-8');
+    expect(reply.raw.headers.get('Cache-Control')).toBe('no-cache');
+    expect(reply.raw.headers.get('Connection')).toBe('keep-alive');
+    expect(reply.raw.headers.get('X-Agent-Session-Id')).toBe('session-1');
+    expect(reply.raw.flushHeadersCalls).toBe(1);
+    assertEventSequence(reply.raw.writes, [
+      `data: ${JSON.stringify(firstEvent)}\n\n`,
+      `data: ${JSON.stringify(secondEvent)}\n\n`,
+    ]);
+  });
+
+  it('streams only events emitted after subscription', async () => {
+    const eventSource = new ControlledEventSource();
+    const reply = createReply();
+    const completion = createDeferred<void>();
+    const agentRuntime = {
+      subscribe: vi.fn((listener: (event: unknown) => void) => eventSource.subscribe(listener)),
+      prompt: vi.fn(async () => ({
+        sessionId: 'session-9',
+        completion: completion.promise,
+      })),
+    };
+
+    eventSource.emit({ type: 'before-subscribe' });
+
+    const streamPromise = streamAgentPromptResponse({
+      agentRuntime,
+      prompt: 'Continue',
+      sessionId: 'session-9',
+      reply,
+    });
+
+    const event = { type: 'after-subscribe' };
+    eventSource.emit(event);
+    completion.resolve();
+
+    await streamPromise;
+
+    assertEventSequence(reply.raw.writes, [`data: ${JSON.stringify(event)}\n\n`]);
+  });
+
+  it('removes the listener and lets the active turn continue on disconnect', async () => {
+    const eventSource = new ControlledEventSource();
+    const reply = createReply();
+    const completion = createDeferred<void>();
+    const agentRuntime = {
+      subscribe: vi.fn((listener: (event: unknown) => void) => eventSource.subscribe(listener)),
+      prompt: vi.fn(async () => ({
+        sessionId: 'session-1',
+        completion: completion.promise,
+      })),
+    };
+
+    const streamPromise = streamAgentPromptResponse({
+      agentRuntime,
+      prompt: 'Implement the feature',
+      reply,
+    });
+
+    expect(eventSource.listenerCount()).toBe(1);
+
+    reply.raw.emit('close');
+    await Promise.resolve();
+
+    expect(eventSource.listenerCount()).toBe(0);
+
+    eventSource.emit({ type: 'ignored' });
+    expect(reply.raw.writes).toEqual([]);
+
+    completion.resolve();
+    await streamPromise;
+  });
+
+  it('propagates runtime errors before streaming starts', async () => {
+    const reply = createReply();
+    const agentRuntime = {
+      subscribe: vi.fn(() => () => undefined),
+      prompt: vi.fn(async () => {
+        throw new Error('boom');
+      }),
+    };
+
+    await expect(
+      streamAgentPromptResponse({
+        agentRuntime,
+        prompt: 'Implement the feature',
+        reply,
+      }),
+    ).rejects.toThrow('boom');
+
+    expect(reply.raw.flushHeadersCalls).toBe(0);
+    expect(reply.raw.writes).toEqual([]);
   });
 
   it('maps validation errors to 400 bad request', async () => {

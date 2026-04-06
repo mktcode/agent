@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
+import path from 'node:path';
 
 import {
   SessionBusyError,
@@ -30,7 +31,7 @@ describe('AgentRuntime.prompt', () => {
     expect(runtime.getState()).toBe('ready');
     expect(turn.sessionId).toBe('session-1');
     expect(session.prompts).toEqual(['Implement the feature']);
-    expect(createSessionCalls[0]?.sessionStoragePath).toBe(`${workspacePath}/.pi/sessions`);
+    expect(createSessionCalls[0]?.sessionStoragePath).toBe(path.join(path.dirname(workspacePath), '.pi', 'sessions'));
   });
 
   it('resumes the requested persistent session when a session id is provided', async () => {

@@ -1,19 +1,41 @@
 import Fastify, { type FastifyInstance, type FastifyRequest } from 'fastify';
 
-import { type AgentRuntime } from './agent-runtime';
+import { type AgentRuntime, type AgentRuntimePromptResult } from './agent-runtime';
 import { AppError, LockUnavailableError, ValidationError } from './errors';
 import { type GitService } from './git-service';
-import {
-  streamAgentPrompt as defaultStreamAgentPrompt,
-  type StreamAgentPromptOptions,
-  type StreamAgentPromptReply,
-} from './streaming';
 
 export interface ApiServerOptions {
   authToken: string;
   gitService: Pick<GitService, 'listBranches' | 'checkout' | 'merge' | 'push' | 'deleteBranch'>;
-  agentRuntime: Pick<AgentRuntime, 'prompt' | 'stop' | 'subscribe'>;
-  streamAgentPrompt?: (options: StreamAgentPromptOptions) => Promise<void> | void;
+  agentRuntime: Pick<AgentRuntime, 'prompt' | 'subscribe'>;
+}
+
+export interface AgentEventSource {
+  subscribe(listener: (event: unknown) => void): () => void;
+}
+
+export interface AgentPromptStreamResponse {
+  statusCode: number;
+  destroyed: boolean;
+  writableEnded: boolean;
+  setHeader(name: string, value: string): void;
+  flushHeaders(): void;
+  write(chunk: string): boolean;
+  end(): void;
+  on(event: 'close' | 'error', listener: () => void): void;
+  off(event: 'close' | 'error', listener: () => void): void;
+}
+
+export interface AgentPromptStreamReply {
+  raw: AgentPromptStreamResponse;
+  hijack(): void;
+}
+
+export interface StreamAgentPromptResponseOptions {
+  agentRuntime: Pick<AgentRuntime, 'prompt' | 'subscribe'>;
+  prompt: string;
+  sessionId?: string;
+  reply: AgentPromptStreamReply;
 }
 
 interface StringBodyShape {
@@ -29,7 +51,6 @@ class UnauthorizedApiError extends Error {
 
 export function createApiServer(options: ApiServerOptions): FastifyInstance {
   const server = Fastify();
-  const streamAgentPrompt = options.streamAgentPrompt ?? defaultStreamAgentPrompt;
 
   server.addHook('onRequest', async (request) => {
     authenticateRequest(request, options.authToken);
@@ -81,11 +102,11 @@ export function createApiServer(options: ApiServerOptions): FastifyInstance {
   server.post('/agent/prompt', async (request, reply) => {
     const { prompt, sessionId } = validateStringBody(request.body, ['prompt'], ['sessionId']);
 
-    await streamAgentPrompt({
+    await streamAgentPromptResponse({
       agentRuntime: options.agentRuntime,
       prompt,
       sessionId,
-      reply: reply as unknown as StreamAgentPromptReply,
+      reply: reply as unknown as AgentPromptStreamReply,
     });
   });
 
@@ -191,4 +212,73 @@ function isFastifyClientError(error: unknown): error is Error & { statusCode: nu
     && typeof error.statusCode === 'number'
     && error.statusCode < 500
   );
+}
+
+export async function streamAgentPromptResponse(
+  options: StreamAgentPromptResponseOptions,
+): Promise<void> {
+  const {
+    agentRuntime,
+    prompt,
+    sessionId,
+    reply,
+  } = options;
+  const response = reply.raw;
+
+  let closed = false;
+
+  const unsubscribe = agentRuntime.subscribe((event) => {
+    if (closed || response.destroyed || response.writableEnded) {
+      return;
+    }
+
+    response.write(`data: ${JSON.stringify(event)}\n\n`);
+  });
+
+  const cleanup = (): void => {
+    unsubscribe();
+    response.off('close', handleDisconnect);
+    response.off('error', handleDisconnect);
+  };
+
+  const handleDisconnect = (): void => {
+    if (closed) {
+      return;
+    }
+
+    closed = true;
+    cleanup();
+  };
+
+  response.on('close', handleDisconnect);
+  response.on('error', handleDisconnect);
+
+  let promptResult: AgentRuntimePromptResult;
+
+  try {
+    promptResult = await agentRuntime.prompt(prompt, sessionId);
+  } catch (error) {
+    cleanup();
+    throw error;
+  }
+
+  if (closed || response.destroyed || response.writableEnded) {
+    return;
+  }
+
+  reply.hijack();
+  response.statusCode = 200;
+  response.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
+  response.setHeader('Cache-Control', 'no-cache');
+  response.setHeader('Connection', 'keep-alive');
+  response.setHeader('X-Agent-Session-Id', promptResult.sessionId);
+  response.flushHeaders();
+
+  await promptResult.completion.catch(() => undefined);
+
+  cleanup();
+
+  if (!closed && !response.destroyed && !response.writableEnded) {
+    response.end();
+  }
 }

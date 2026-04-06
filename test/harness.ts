@@ -11,8 +11,8 @@ import {
   type CreateAgentRuntimeSessionOptions,
   type CreateAgentRuntimeSession,
 } from '../src/agent-runtime';
+import type { AgentPromptStreamReply } from '../src/api';
 import { SessionNotFoundError } from '../src/errors';
-import type { AgentEventSource, StreamAgentPromptReply } from '../src/streaming';
 import { WorkspaceManager } from '../src/workspace';
 import {
   commitFile as commitGitFile,
@@ -266,7 +266,7 @@ export function assertStreamCompletion(events: Array<{ type?: unknown }>): void 
   expect(events.at(-1)?.type === 'done' || events.at(-1)?.type === 'error').toBe(true);
 }
 
-export class ControlledEventSource implements AgentEventSource {
+export class ControlledEventSource {
   readonly #listeners = new Set<(event: unknown) => void>();
 
   public emit(event: unknown): void {
@@ -327,7 +327,7 @@ export class FakeRawResponse extends EventEmitter {
   }
 }
 
-export interface FakeReply extends StreamAgentPromptReply {
+export interface FakeReply extends AgentPromptStreamReply {
   raw: FakeRawResponse;
 }
 
