@@ -68,6 +68,16 @@ It must not contain business logic or orchestration.
 
 ---
 
+## Updates and Changes
+
+If asked to implement a new feature or change behavior:
+
+1. Update the relevant spec(s) to include the new behavior
+2. **Ask for confirmation that the spec update is correct before implementation**
+3. Implement the feature according to the updated spec
+
+---
+
 ## Final Rule
 
 When in doubt:
