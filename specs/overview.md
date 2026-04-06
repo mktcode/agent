@@ -31,6 +31,7 @@ The system runs as a single process with a persistent local workspace:
 * One API server (Fastify, TypeScript, `ts-node`)
 * One workspace directory (`./.workspace`)
 * One repository cloned from `REPO_URL`
+* One project-local PI session directory (`./.pi/sessions`)
 
 All git operations and agent execution occur directly inside this workspace.
 
@@ -129,6 +130,20 @@ There are:
 
 ---
 
+## Agent Transport
+
+Agent execution uses a single HTTP endpoint:
+
+* `POST /agent/prompt`
+
+That request both:
+
+* selects or creates the PI session
+* executes one agent turn
+* streams live agent events back to the client via SSE
+
+---
+
 ## Failure Philosophy
 
 The system fails explicitly and immediately:
@@ -147,7 +162,6 @@ The following are explicitly out of scope:
 
 * Multi-tenancy
 * Horizontal scaling
-* Session persistence across restarts
 * Automatic retries or recovery
 * Conflict resolution strategies
 * Background job processing

@@ -8,9 +8,11 @@ import { expect } from 'vitest';
 import {
   AgentRuntime,
   type AgentRuntimeSession,
+  type CreateAgentRuntimeSessionOptions,
   type CreateAgentRuntimeSession,
 } from '../src/agent-runtime';
-import type { AgentEventSource, StreamAgentEventsReply } from '../src/streaming';
+import { SessionNotFoundError } from '../src/errors';
+import type { AgentEventSource, StreamAgentPromptReply } from '../src/streaming';
 import { WorkspaceManager } from '../src/workspace';
 import {
   commitFile as commitGitFile,
@@ -107,6 +109,7 @@ export function createDeferred<T>(): Deferred<T> {
 }
 
 export class ControlledAgentSession implements AgentRuntimeSession {
+  public readonly sessionId: string;
   public readonly prompts: string[] = [];
   public readonly promptGates: Array<Deferred<void>> = [];
   public readonly promptStartedSignals: Array<Promise<void>> = [];
@@ -116,6 +119,10 @@ export class ControlledAgentSession implements AgentRuntimeSession {
   readonly #listeners = new Set<(event: unknown) => void>();
   readonly #failures: unknown[] = [];
   readonly #pendingPromptStarts: Array<Deferred<void>> = [];
+
+  public constructor(sessionId: string) {
+    this.sessionId = sessionId;
+  }
 
   public queuePrompt(): Deferred<void> {
     const started = createDeferred<void>();
@@ -179,8 +186,9 @@ export interface RuntimeHarness {
   runtime: AgentRuntime;
   workspace: WorkspaceManager;
   workspacePath: string;
-  session: ControlledAgentSession;
   createSession: CreateAgentRuntimeSession;
+  createSessionCalls: CreateAgentRuntimeSessionOptions[];
+  getSession(sessionId: string): ControlledAgentSession;
 }
 
 export async function createRuntimeHarness(
@@ -189,9 +197,27 @@ export async function createRuntimeHarness(
 ): Promise<RuntimeHarness> {
   const workspacePath = await createTempWorkspacePath(cleanup, prefix);
   const workspace = new WorkspaceManager({ repoUrl: '/tmp/unused', workspacePath });
-  const session = new ControlledAgentSession();
+  const sessions = new Map<string, ControlledAgentSession>();
+  const createSessionCalls: CreateAgentRuntimeSessionOptions[] = [];
 
-  const createSession: CreateAgentRuntimeSession = async () => session;
+  const createSession: CreateAgentRuntimeSession = async (options) => {
+    createSessionCalls.push(options);
+
+    if (options.sessionId) {
+      const existing = sessions.get(options.sessionId);
+
+      if (!existing) {
+        throw new SessionNotFoundError({ sessionId: options.sessionId });
+      }
+
+      return existing;
+    }
+
+    const sessionId = `session-${sessions.size + 1}`;
+    const session = new ControlledAgentSession(sessionId);
+    sessions.set(sessionId, session);
+    return session;
+  };
 
   return {
     runtime: new AgentRuntime({
@@ -201,8 +227,17 @@ export async function createRuntimeHarness(
     }),
     workspace,
     workspacePath,
-    session,
     createSession,
+    createSessionCalls,
+    getSession(sessionId: string): ControlledAgentSession {
+      const session = sessions.get(sessionId);
+
+      if (!session) {
+        throw new Error(`Unknown controlled session: ${sessionId}`);
+      }
+
+      return session;
+    },
   };
 }
 
@@ -292,7 +327,7 @@ export class FakeRawResponse extends EventEmitter {
   }
 }
 
-export interface FakeReply extends StreamAgentEventsReply {
+export interface FakeReply extends StreamAgentPromptReply {
   raw: FakeRawResponse;
 }
 

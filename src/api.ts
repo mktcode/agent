@@ -4,16 +4,16 @@ import { type AgentRuntime } from './agent-runtime';
 import { AppError, LockUnavailableError, ValidationError } from './errors';
 import { type GitService } from './git-service';
 import {
-  streamAgentEvents as defaultStreamAgentEvents,
-  type StreamAgentEventsOptions,
-  type StreamAgentEventsReply,
+  streamAgentPrompt as defaultStreamAgentPrompt,
+  type StreamAgentPromptOptions,
+  type StreamAgentPromptReply,
 } from './streaming';
 
 export interface ApiServerOptions {
   authToken: string;
   gitService: Pick<GitService, 'listBranches' | 'checkout' | 'merge' | 'push' | 'deleteBranch'>;
-  agentRuntime: Pick<AgentRuntime, 'start' | 'send' | 'stop' | 'subscribe'>;
-  streamAgentEvents?: (options: StreamAgentEventsOptions) => void;
+  agentRuntime: Pick<AgentRuntime, 'prompt' | 'stop' | 'subscribe'>;
+  streamAgentPrompt?: (options: StreamAgentPromptOptions) => Promise<void> | void;
 }
 
 interface StringBodyShape {
@@ -29,7 +29,7 @@ class UnauthorizedApiError extends Error {
 
 export function createApiServer(options: ApiServerOptions): FastifyInstance {
   const server = Fastify();
-  const streamAgentEvents = options.streamAgentEvents ?? defaultStreamAgentEvents;
+  const streamAgentPrompt = options.streamAgentPrompt ?? defaultStreamAgentPrompt;
 
   server.addHook('onRequest', async (request) => {
     authenticateRequest(request, options.authToken);
@@ -78,32 +78,14 @@ export function createApiServer(options: ApiServerOptions): FastifyInstance {
     reply.status(200).send({});
   });
 
-  server.post('/agent/start', async (request, reply) => {
-    const { prompt } = validateStringBody(request.body, ['prompt']);
+  server.post('/agent/prompt', async (request, reply) => {
+    const { prompt, sessionId } = validateStringBody(request.body, ['prompt'], ['sessionId']);
 
-    await options.agentRuntime.start(prompt);
-
-    reply.status(200).send({});
-  });
-
-  server.post('/agent/send', async (request, reply) => {
-    const { input } = validateStringBody(request.body, ['input']);
-
-    await options.agentRuntime.send(input);
-
-    reply.status(200).send({});
-  });
-
-  server.delete('/agent/session', async (_request, reply) => {
-    await options.agentRuntime.stop();
-
-    reply.status(200).send({});
-  });
-
-  server.get('/agent/stream', async (_request, reply) => {
-    streamAgentEvents({
-      eventSource: options.agentRuntime,
-      reply: reply as unknown as StreamAgentEventsReply,
+    await streamAgentPrompt({
+      agentRuntime: options.agentRuntime,
+      prompt,
+      sessionId,
+      reply: reply as unknown as StreamAgentPromptReply,
     });
   });
 
@@ -118,8 +100,13 @@ function authenticateRequest(request: FastifyRequest, authToken: string): void {
   }
 }
 
-function validateStringBody(body: unknown, requiredKeys: string[]): StringBodyShape {
+function validateStringBody(
+  body: unknown,
+  requiredKeys: string[],
+  optionalKeys: string[] = [],
+): StringBodyShape {
   const issues: string[] = [];
+  const allowedKeys = [...requiredKeys, ...optionalKeys];
 
   if (!isRecord(body)) {
     throw new ValidationError('Invalid request body.', {
@@ -133,8 +120,14 @@ function validateStringBody(body: unknown, requiredKeys: string[]): StringBodySh
     }
   }
 
+  for (const key of optionalKeys) {
+    if (key in body && typeof body[key] !== 'string') {
+      issues.push(`${key} must be a string`);
+    }
+  }
+
   for (const key of Object.keys(body)) {
-    if (!requiredKeys.includes(key)) {
+    if (!allowedKeys.includes(key)) {
       issues.push(`Unexpected field: ${key}`);
     }
   }

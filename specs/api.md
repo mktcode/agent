@@ -190,77 +190,52 @@ Response:
 
 ### Agent
 
-#### `POST /agent/start`
+#### `POST /agent/prompt`
 
 Request:
 
 ```json id="0xg1s2"
 {
-  "prompt": "string"
+  "prompt": "string",
+  "sessionId": "string"
 }
 ```
 
 Behavior:
 
-* Calls `agentRuntime.start`
+* Calls the streaming layer
+* If `sessionId` is omitted, the runtime creates a new persistent PI session
+* If `sessionId` is provided, the runtime resumes that persistent PI session
+* Executes one agent turn for `prompt`
+* Streams live agent events on the same HTTP response
 
-Response:
-
-```json id="d8m3rp"
-{}
-```
-
----
-
-#### `POST /agent/send`
-
-Request:
-
-```json id="6t4yzn"
-{
-  "input": "string"
-}
-```
-
-Behavior:
-
-* Calls `agentRuntime.send`
-
-Response:
-
-```json id="c7h5wl"
-{}
-```
-
----
-
-#### `DELETE /agent/session`
-
-Behavior:
-
-* Calls `agentRuntime.stop`
-
-Response:
-
-```json id="k2n9vx"
-{}
-```
-
----
-
-#### `GET /agent/stream`
-
-Behavior:
-
-* Establishes SSE connection via streaming layer
-* Does not trigger agent execution
-
-Response headers:
+Success response headers:
 
 ```
 Content-Type: text/event-stream
 Cache-Control: no-cache
 Connection: keep-alive
+X-Agent-Session-Id: <sessionId>
+```
+
+Response body:
+
+* SSE stream of live agent events for the requested turn
+
+The `sessionId` request field is optional.
+The `X-Agent-Session-Id` response header is always required on successful responses.
+
+Error responses before streaming starts use the standard JSON error format.
+
+If the client disconnects during execution, the active turn continues to run and finishes gracefully.
+
+### SSE response format
+
+Each event must be sent as:
+
+```
+data: <JSON serialized event>
+
 ```
 
 ---
@@ -268,8 +243,8 @@ Connection: keep-alive
 ## Idempotency
 
 * `GET` endpoints → idempotent
-* `DELETE /agent/session` → idempotent
-* All `POST` endpoints → non-idempotent
+* `POST /agent/prompt` → non-idempotent
+* All other `POST` endpoints → non-idempotent
 
 ---
 
@@ -281,13 +256,12 @@ Connection: keep-alive
 
 ---
 
-## Streaming Constraints
+## Agent Prompt Constraints
 
-* Streaming endpoint must not:
-
-  * start sessions
-  * modify state
-* It only attaches to the streaming layer
+* `POST /agent/prompt` is the only agent endpoint
+* Session creation versus resume is handled entirely inside the agent runtime
+* The API layer treats `sessionId` as opaque input/output data
+* The API layer does not subscribe to agent events directly
 
 ---
 

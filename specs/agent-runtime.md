@@ -7,7 +7,7 @@ This module orchestrates execution of the **PI Coding Agent** within the system.
 It does **not** implement an agent.
 It acts as a **thin control layer** around the PI agent SDK, responsible only for:
 
-* Managing a single multi-turn session
+* Managing persistent PI sessions identified by session ID
 * Executing individual turns
 * Owning the workspace lock during execution
 * Forwarding agent events
@@ -31,7 +31,8 @@ The PI agent must be treated as a **black box**.
 
 The module owns:
 
-* A single active session (multi-turn)
+* Persistent PI sessions stored on disk
+* At most one loaded session instance at a time
 * Triggering agent execution per turn
 * Holding the workspace lock during execution only
 * Forwarding agent events transparently
@@ -41,57 +42,54 @@ It must not:
 * Implement agent behavior
 * Modify or inject tools
 * Interpret or transform agent events
-* Manage multiple sessions
+* Execute multiple sessions concurrently
 
 ---
 
 ## Session Model
 
-There is exactly **one session slot**.
+PI sessions are persisted on disk and identified by `sessionId`.
+
+Multiple persisted sessions may exist.
+
+At runtime there is exactly **one loaded session slot**.
 
 Session states:
 
-* `idle` – no session exists
-* `ready` – session exists, waiting for input
+* `idle` – no session is loaded
+* `ready` – one session is loaded, waiting for input
 * `running` – agent is executing a turn
 
 ### Invariant
 
-> A session persists across turns, but only one turn executes at a time.
+> Persisted sessions may outlive the process, but only one turn executes at a time.
 
 ---
 
 ## Public API
 
-### `start(prompt: string): Promise<void>`
+### `prompt(input: string, sessionId?: string): Promise<{ sessionId: string, completion: Promise<void> }>`
 
-Creates a new session and executes the first turn.
-
-Behavior:
-
-1. If a session already exists → throw `SessionAlreadyExistsError`
-2. Initialize PI agent session via SDK
-3. Bind agent to `./.workspace`
-4. Execute first turn with `prompt`
-5. Transition state → `running`
-
-Execution must follow the same rules as `send()`.
-
----
-
-### `send(input: string): Promise<void>`
-
-Executes a new turn in the existing session.
+Creates or resumes a session and starts one turn.
 
 Behavior:
 
-1. If no session exists → throw `NoActiveSessionError`
-2. If a turn is already running → throw `SessionBusyError`
-3. Acquire workspace lock via `runExclusive`
-4. Send input to agent via SDK
-5. Stream events during execution
-6. On completion → transition state → `ready`
-7. Release lock
+1. If a turn is already running → throw `SessionBusyError`
+2. If `sessionId` is omitted:
+
+  * Create a new persistent PI session via SDK
+  * Use the project-local session directory `./.pi/sessions`
+3. If `sessionId` is provided:
+
+  * Open the persisted PI session matching that ID
+  * If no such session exists → throw `SessionNotFoundError`
+4. Bind agent to `./.workspace`
+5. Return the effective `sessionId` plus a completion promise to the caller before the first agent event is emitted
+6. Acquire workspace lock via `runExclusive`
+7. Send input to agent via SDK
+8. Forward agent events during execution
+9. On completion → transition state → `ready`
+10. Release lock
 
 ---
 
@@ -101,7 +99,7 @@ Terminates the session.
 
 Behavior:
 
-* If no session exists → no-op
+* If no session is loaded → no-op
 * If a turn is running:
 
   * Signal cancellation via SDK
@@ -110,8 +108,10 @@ Behavior:
 After termination:
 
 * Release lock if held
-* Destroy session
+* Dispose the loaded session instance
 * Transition state → `idle`
+
+Stopping execution must not delete persisted PI session files.
 
 ---
 
@@ -137,7 +137,7 @@ Execution is **turn-based**.
 
 Each turn:
 
-* Is triggered explicitly (`start` or `send`)
+* Is triggered explicitly (`prompt`)
 * Runs to completion or failure
 * Holds the workspace lock for its full duration
 
@@ -180,6 +180,8 @@ Constraints:
 
 Events are treated as opaque data and passed directly to subscribers.
 
+If the loaded session changes between turns, subscriptions remain attached to the runtime and receive events from the next executing turn without replay.
+
 ---
 
 ## Failure Handling
@@ -214,19 +216,20 @@ No abrupt termination without cleanup.
 ## Session Persistence
 
 * Session memory and logs are managed by the PI agent
-* This module does not access or interpret them
+* This module must use the PI SDK's file-backed session manager APIs
+* Session files must be stored in `./.pi/sessions`
+* This module must not define a second session storage format or duplicate session history
 
-The runtime manages only **live execution state**.
+The runtime manages only **live execution state** plus selection of which persisted PI session to load for a turn.
 
 ---
 
 ## Non-Goals
 
-* No multiple sessions
-* No session resume after process restart
+* No parallel execution
 * No history querying
 * No tool injection or modification
-* No parallel execution
+* No session metadata store separate from PI session files
 
 ---
 
@@ -236,9 +239,10 @@ Use a stubbed or controlled agent implementation.
 
 ### Required Cases
 
-* Start creates session and runs first turn
-* Send executes additional turns
-* Send while running → fails
+* Prompt without `sessionId` creates a persistent session and runs a turn
+* Prompt with `sessionId` resumes the matching persistent session
+* Prompt with unknown `sessionId` fails
+* Prompt while running → fails
 * Lock is held during execution
 * Lock is released after each turn
 * Stop terminates session
@@ -258,6 +262,6 @@ Tests must be deterministic and independent of real LLM behavior.
 
 At all times:
 
-> There is at most one session, it executes one turn at a time under exclusive workspace access, and all agent behavior and events are delegated to the PI SDK without modification.
+> Persisted PI sessions are the source of truth for session history, the runtime executes at most one turn at a time under exclusive workspace access, and all agent behavior and events are delegated to the PI SDK without modification.
 
 Any additional logic beyond orchestration violates this module’s contract.

@@ -65,9 +65,8 @@ All modules must throw only:
 
 ### Agent Errors
 
-* `SessionAlreadyExistsError`
-* `NoActiveSessionError`
 * `SessionBusyError`
+* `SessionNotFoundError`
 
 ### Git Errors
 

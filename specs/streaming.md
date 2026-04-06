@@ -2,11 +2,11 @@
 
 ## Purpose
 
-This module exposes agent events to clients via a streaming HTTP interface.
+This module executes one agent prompt request and exposes the resulting agent events to the client via a streaming HTTP response.
 
-It acts as a **pure transport adapter**, converting internal agent events into a stream consumable by the frontend.
+It acts as the **transport boundary** for agent execution, combining prompt invocation with SSE delivery.
 
-It does not implement business logic, state management, or event processing.
+It does not implement agent behavior, persist transport state, or interpret events.
 
 ---
 
@@ -22,28 +22,33 @@ This is the only supported transport.
 
 The module:
 
+* Starts one agent turn through the agent runtime
 * Subscribes to agent runtime events
-* Streams events to connected clients
+* Streams live events to the requesting client
 * Manages connection lifecycle
 
 It must not:
 
 * Modify or interpret events
 * Buffer or store events
-* Trigger agent execution
-* Maintain session state
+* Implement agent logic
+* Maintain session history
 
 ---
 
-## Connection Model
+## Request Model
 
-* Each client establishes an independent SSE connection
-* Multiple concurrent clients are allowed
-* Each client receives only **live events**
+Each `POST /agent/prompt` request creates one SSE response stream for one agent turn.
+
+The module must:
+
+* create or resume the session through the agent runtime
+* set the `X-Agent-Session-Id` response header before writing the first SSE frame
+* stream only **live events** from that turn
 
 ### No Replay
 
-> Events emitted before a client connects are not replayed.
+> Events emitted before the request subscribes are not replayed.
 
 ---
 
@@ -82,6 +87,8 @@ The module must not introduce reordering under any circumstances.
 * No batching
 * No buffering
 
+The module starts streaming only after the runtime returns the effective `sessionId`.
+
 ---
 
 ## Backpressure
@@ -99,14 +106,14 @@ When a client disconnects:
 
 * The connection is closed
 * The event listener is removed
-
-The agent runtime is **not affected**.
+* The active turn is cancelled through the agent runtime
 
 ---
 
 ## Error Handling
 
 * Agent-emitted `error` events are forwarded like any other event
+* Runtime errors before streaming begins propagate to the API layer
 * Transport-level errors terminate the connection
 * No retries or reconnection logic is implemented server-side
 
@@ -126,10 +133,12 @@ Use a controlled event source (stubbed agent runtime).
 
 ### Required Cases
 
+* The module starts a prompt through the runtime
 * Events are streamed in order
-* Multiple clients receive identical event sequences
-* Clients only receive events after connection
+* The effective session ID is written to the response header
+* Only events emitted after subscription are streamed
 * Disconnect removes listener correctly
+* Disconnect cancels the active turn
 
 Tests must be deterministic and not rely on timing.
 
@@ -139,6 +148,6 @@ Tests must be deterministic and not rely on timing.
 
 At all times:
 
-> The streaming layer forwards agent events exactly as received, in order, without modification or buffering.
+> The streaming layer executes one prompt request, returns the effective session ID as response metadata, and forwards agent events exactly as received, in order, without modification or buffering.
 
 Any transformation or stateful behavior violates this module’s contract.

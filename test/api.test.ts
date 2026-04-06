@@ -5,10 +5,10 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createApiServer } from '../src/api';
 import {
   LockUnavailableError,
-  NoActiveSessionError,
+  SessionNotFoundError,
   ValidationError,
 } from '../src/errors';
-import type { StreamAgentEventsOptions } from '../src/streaming';
+import type { StreamAgentPromptOptions } from '../src/streaming';
 
 interface GitServiceStub {
   listBranches: ReturnType<typeof vi.fn>;
@@ -19,8 +19,7 @@ interface GitServiceStub {
 }
 
 interface AgentRuntimeStub {
-  start: ReturnType<typeof vi.fn>;
-  send: ReturnType<typeof vi.fn>;
+  prompt: ReturnType<typeof vi.fn>;
   stop: ReturnType<typeof vi.fn>;
   subscribe: ReturnType<typeof vi.fn>;
 }
@@ -42,16 +41,16 @@ function createServer() {
     deleteBranch: vi.fn(async () => undefined),
   };
   const agentRuntime: AgentRuntimeStub = {
-    start: vi.fn(async () => undefined),
-    send: vi.fn(async () => undefined),
+    prompt: vi.fn(async () => ({ sessionId: 'session-1', completion: Promise.resolve() })),
     stop: vi.fn(async () => undefined),
     subscribe: vi.fn(() => () => undefined),
   };
-  const streamAgentEvents = vi.fn((options: StreamAgentEventsOptions) => {
-    const raw = options.reply.raw as StreamAgentEventsOptions['reply']['raw'] & { end(): void };
+  const streamAgentPrompt = vi.fn((options: StreamAgentPromptOptions) => {
+    const raw = options.reply.raw as StreamAgentPromptOptions['reply']['raw'] & { end(): void };
 
     options.reply.hijack();
     raw.statusCode = 200;
+    raw.setHeader('X-Agent-Session-Id', 'session-1');
     raw.end();
   });
 
@@ -59,12 +58,12 @@ function createServer() {
     authToken: 'secret-token',
     gitService,
     agentRuntime,
-    streamAgentEvents,
+    streamAgentPrompt,
   });
 
   servers.push(server);
 
-  return { server, gitService, agentRuntime, streamAgentEvents };
+  return { server, gitService, agentRuntime, streamAgentPrompt };
 }
 
 function authorizedHeaders() {
@@ -93,11 +92,11 @@ describe('API authentication', () => {
   });
 
   it('rejects requests with an invalid bearer token', async () => {
-    const { server, agentRuntime } = createServer();
+    const { server, streamAgentPrompt } = createServer();
 
     const response = await server.inject({
       method: 'POST',
-      url: '/agent/start',
+      url: '/agent/prompt',
       headers: {
         authorization: 'Bearer wrong-token',
       },
@@ -113,7 +112,7 @@ describe('API authentication', () => {
         message: 'Unauthorized.',
       },
     });
-    expect(agentRuntime.start).not.toHaveBeenCalled();
+    expect(streamAgentPrompt).not.toHaveBeenCalled();
   });
 });
 
@@ -166,6 +165,28 @@ describe('API validation', () => {
     });
     expect(gitService.push).not.toHaveBeenCalled();
   });
+
+  it('accepts an optional string session id for prompt requests', async () => {
+    const { server, streamAgentPrompt } = createServer();
+
+    const response = await server.inject({
+      method: 'POST',
+      url: '/agent/prompt',
+      headers: authorizedHeaders(),
+      payload: {
+        prompt: 'Continue',
+        sessionId: 'session-123',
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(streamAgentPrompt).toHaveBeenCalledWith(
+      expect.objectContaining({
+        prompt: 'Continue',
+        sessionId: 'session-123',
+      }),
+    );
+  });
 });
 
 describe('API delegation', () => {
@@ -204,51 +225,28 @@ describe('API delegation', () => {
     expect(gitService.merge).toHaveBeenCalledWith('feature', 'main');
   });
 
-  it('delegates agent endpoints directly to the agent runtime', async () => {
-    const { server, agentRuntime } = createServer();
+  it('delegates agent prompts directly to the streaming layer', async () => {
+    const { server, agentRuntime, streamAgentPrompt } = createServer();
 
-    const startResponse = await server.inject({
+    const response = await server.inject({
       method: 'POST',
-      url: '/agent/start',
+      url: '/agent/prompt',
       headers: authorizedHeaders(),
       payload: {
         prompt: 'Implement the feature',
+        sessionId: 'session-9',
       },
-    });
-    const sendResponse = await server.inject({
-      method: 'POST',
-      url: '/agent/send',
-      headers: authorizedHeaders(),
-      payload: {
-        input: 'Continue',
-      },
-    });
-    const stopResponse = await server.inject({
-      method: 'DELETE',
-      url: '/agent/session',
-      headers: authorizedHeaders(),
-    });
-
-    expect(startResponse.statusCode).toBe(200);
-    expect(sendResponse.statusCode).toBe(200);
-    expect(stopResponse.statusCode).toBe(200);
-    expect(agentRuntime.start).toHaveBeenCalledWith('Implement the feature');
-    expect(agentRuntime.send).toHaveBeenCalledWith('Continue');
-    expect(agentRuntime.stop).toHaveBeenCalledTimes(1);
-  });
-
-  it('attaches the streaming endpoint directly to the streaming layer', async () => {
-    const { server, agentRuntime, streamAgentEvents } = createServer();
-
-    const response = await server.inject({
-      method: 'GET',
-      url: '/agent/stream',
-      headers: authorizedHeaders(),
     });
 
     expect(response.statusCode).toBe(200);
-    expect(streamAgentEvents).toHaveBeenCalledTimes(1);
-    expect(streamAgentEvents.mock.calls[0]?.[0].eventSource).toBe(agentRuntime);
+    expect(streamAgentPrompt).toHaveBeenCalledTimes(1);
+    expect(streamAgentPrompt.mock.calls[0]?.[0]).toEqual(
+      expect.objectContaining({
+        agentRuntime,
+        prompt: 'Implement the feature',
+        sessionId: 'session-9',
+      }),
+    );
   });
 });
 
@@ -277,24 +275,25 @@ describe('API error mapping', () => {
   });
 
   it('maps known domain errors to 400 bad request', async () => {
-    const { server, agentRuntime } = createServer();
+    const { server, streamAgentPrompt } = createServer();
 
-    agentRuntime.send.mockRejectedValueOnce(new NoActiveSessionError());
+    streamAgentPrompt.mockRejectedValueOnce(new SessionNotFoundError());
 
     const response = await server.inject({
       method: 'POST',
-      url: '/agent/send',
+      url: '/agent/prompt',
       headers: authorizedHeaders(),
       payload: {
-        input: 'Continue',
+        prompt: 'Continue',
+        sessionId: 'missing',
       },
     });
 
     expect(response.statusCode).toBe(400);
     expect(response.json()).toEqual({
       error: {
-        code: 'NO_ACTIVE_SESSION',
-        message: 'There is no active agent session.',
+        code: 'SESSION_NOT_FOUND',
+        message: 'The requested agent session was not found.',
       },
     });
   });

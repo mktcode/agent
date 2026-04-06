@@ -51,21 +51,15 @@ export class InvalidLockStateError extends AppError {
   }
 }
 
-export class SessionAlreadyExistsError extends AppError {
-  public constructor(details?: AppErrorDetails) {
-    super('SESSION_ALREADY_EXISTS', 'An agent session already exists.', details);
-  }
-}
-
-export class NoActiveSessionError extends AppError {
-  public constructor(details?: AppErrorDetails) {
-    super('NO_ACTIVE_SESSION', 'There is no active agent session.', details);
-  }
-}
-
 export class SessionBusyError extends AppError {
   public constructor(details?: AppErrorDetails) {
     super('SESSION_BUSY', 'The agent session is already executing a turn.', details);
+  }
+}
+
+export class SessionNotFoundError extends AppError {
+  public constructor(details?: AppErrorDetails) {
+    super('SESSION_NOT_FOUND', 'The requested agent session was not found.', details);
   }
 }
 

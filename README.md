@@ -120,34 +120,22 @@ curl -X DELETE http://127.0.0.1:3000/git/branch \
   -d '{"branch":"feature-x"}'
 ```
 
-Start an agent session:
+Run one agent prompt and stream live events:
 
 ```bash
-curl -X POST http://127.0.0.1:3000/agent/start \
+curl -N -X POST http://127.0.0.1:3000/agent/prompt \
   -H 'Authorization: Bearer secret-token' \
   -H 'Content-Type: application/json' \
   -d '{"prompt":"Implement the missing API layer."}'
 ```
 
-Send another turn to the active session:
+Continue an existing PI session:
 
 ```bash
-curl -X POST http://127.0.0.1:3000/agent/send \
+curl -N -X POST http://127.0.0.1:3000/agent/prompt \
   -H 'Authorization: Bearer secret-token' \
   -H 'Content-Type: application/json' \
-  -d '{"input":"Now add tests."}'
+  -d '{"prompt":"Now add tests.","sessionId":"<session-id>"}'
 ```
 
-Stop the active session:
-
-```bash
-curl -X DELETE http://127.0.0.1:3000/agent/session \
-  -H 'Authorization: Bearer secret-token'
-```
-
-Open the SSE event stream:
-
-```bash
-curl -N http://127.0.0.1:3000/agent/stream \
-  -H 'Authorization: Bearer secret-token'
-```
+Successful prompt responses use SSE and include the effective session ID in the `X-Agent-Session-Id` response header.
