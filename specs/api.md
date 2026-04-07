@@ -99,8 +99,6 @@ Response:
 }
 ```
 
----
-
 #### `GET /git/branches`
 
 Returns all local branches.
@@ -112,8 +110,6 @@ Response:
   "branches": ["main", "feature-x"]
 }
 ```
-
----
 
 #### `POST /git/checkout`
 
@@ -135,7 +131,6 @@ Response:
 {}
 ```
 
----
 #### `POST /git/merge`
 
 Request:
@@ -156,8 +151,6 @@ Response:
 ```json
 {}
 ```
-
----
 
 #### `POST /git/push`
 
@@ -181,8 +174,6 @@ Response:
 {}
 ```
 
----
-
 #### `POST /git/revert`
 
 Discards all uncommitted changes in the current working tree.
@@ -196,8 +187,6 @@ Response:
 ```json
 {}
 ```
-
----
 
 #### `DELETE /git/branch`
 
@@ -218,8 +207,6 @@ Response:
 ```json
 {}
 ```
-
----
 
 ### Agent
 
@@ -262,16 +249,13 @@ Error responses before streaming starts use the standard JSON error format.
 
 If the client disconnects during execution, the active turn continues to run and finishes gracefully.
 
-#### SSE response format
+##### SSE response format
 
 Each event must be sent as:
 
 ```
 data: <JSON serialized event>
-
 ```
-
----
 
 #### `GET /agent/sessions`
 
@@ -288,13 +272,47 @@ Response:
 {
   "sessions": [
     {
-      // pi SessionInfo
+      "id": "string",
+      "path": "string",
+      "cwd": "string",
+      "name": "string",
+      "created": "ISO date string",
+      "modified": "ISO date string",
+      "messageCount": 1,
+      "firstMessage": "string",
+      "allMessagesText": "string"
     }
   ]
 }
 ```
 
----
+#### `GET /agent/session/:sessionId`
+
+Returns metadata for the persisted session matching `sessionId`.
+
+Behavior:
+
+* Calls `agentRuntime.getSession`
+* If no such persisted session exists → return the standard error response for `SessionNotFoundError`
+
+Response:
+
+```json
+{
+  "session": {
+    "id": "string",
+    "path": "string",
+    "cwd": "string",
+    "name": "string",
+    "created": "ISO date string",
+    "modified": "ISO date string",
+    "messageCount": 1,
+    "firstMessage": "string",
+    "allMessagesText": "string"
+  }
+}
+```
+
 
 #### `DELETE /agent/session`
 

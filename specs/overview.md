@@ -135,6 +135,7 @@ Agent transport uses dedicated HTTP endpoints:
 
 * `POST /agent/prompt`
 * `GET /agent/sessions`
+* `GET /agent/session/:sessionId`
 * `DELETE /agent/session`
 
 Only `POST /agent/prompt` executes the agent.

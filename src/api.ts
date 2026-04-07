@@ -11,11 +11,15 @@ import { type GitService } from './git-service';
 export interface ApiServerOptions {
   authToken: string;
   gitService: Pick<GitService, 'getStatus' | 'listBranches' | 'checkout' | 'merge' | 'push' | 'revert' | 'deleteBranch'>;
-  agentRuntime: Pick<AgentRuntime, 'prompt' | 'listSessions' | 'deleteSession' | 'subscribe'>;
+  agentRuntime: Pick<AgentRuntime, 'prompt' | 'listSessions' | 'getSession' | 'deleteSession' | 'subscribe'>;
 }
 
 export interface AgentSessionsResponse {
   sessions: AgentRuntimeSessionInfo[];
+}
+
+export interface AgentSessionResponse {
+  session: AgentRuntimeSessionInfo;
 }
 
 export interface AgentEventSource {
@@ -135,6 +139,13 @@ export function createApiServer(options: ApiServerOptions): FastifyInstance {
     return { sessions };
   });
 
+  server.get('/agent/session/:sessionId', async (request): Promise<AgentSessionResponse> => {
+    const { sessionId } = validateStringParams(request.params, ['sessionId']);
+    const session = await options.agentRuntime.getSession(sessionId);
+
+    return { session };
+  });
+
   server.delete('/agent/session', async (request, reply) => {
     const { sessionId } = validateStringBody(request.body, ['sessionId']);
 
@@ -159,28 +170,44 @@ function validateStringBody(
   requiredKeys: string[],
   optionalKeys: string[] = [],
 ): StringBodyShape {
+  return validateStringRecord(body, requiredKeys, optionalKeys);
+}
+
+function validateStringParams(
+  params: unknown,
+  requiredKeys: string[],
+  optionalKeys: string[] = [],
+): StringBodyShape {
+  return validateStringRecord(params, requiredKeys, optionalKeys);
+}
+
+function validateStringRecord(
+  value: unknown,
+  requiredKeys: string[],
+  optionalKeys: string[] = [],
+): StringBodyShape {
   const issues: string[] = [];
   const allowedKeys = [...requiredKeys, ...optionalKeys];
 
-  if (!isRecord(body)) {
+  if (!isRecord(value)) {
     throw new ValidationError('Invalid request body.', {
       issues: ['Request body must be an object'],
     });
   }
 
   for (const key of requiredKeys) {
-    if (typeof body[key] !== 'string') {
+    if (typeof value[key] !== 'string') {
       issues.push(`${key} must be a string`);
     }
   }
 
   for (const key of optionalKeys) {
-    if (key in body && typeof body[key] !== 'string') {
+    if (key in value && typeof value[key] !== 'string') {
       issues.push(`${key} must be a string`);
     }
   }
 
-  for (const key of Object.keys(body)) {
+  for (const key of Object.keys(value)) {
     if (!allowedKeys.includes(key)) {
       issues.push(`Unexpected field: ${key}`);
     }
@@ -190,7 +217,7 @@ function validateStringBody(
     throw new ValidationError('Invalid request body.', { issues });
   }
 
-  return body as StringBodyShape;
+  return value as StringBodyShape;
 }
 
 function validateEmptyBody(body: unknown): void {

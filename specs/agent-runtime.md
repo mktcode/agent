@@ -102,6 +102,17 @@ Behavior:
 * Return entries sorted by `sessionId` in ascending lexicographic order
 * Do not modify runtime state
 
+### `getSession(sessionId: string): Promise<SessionInfo>`
+
+Returns metadata for the persisted session matching `sessionId`.
+
+Behavior:
+
+* Read session metadata from persistent storage
+* Resolve the entry whose `id` matches `sessionId`
+* If no such session exists → throw `SessionNotFoundError`
+* Do not modify runtime state
+
 ### `deleteSession(sessionId: string): Promise<void>`
 
 Deletes the persisted session matching `sessionId`.

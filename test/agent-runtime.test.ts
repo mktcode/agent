@@ -178,6 +178,31 @@ describe('AgentRuntime.listSessions', () => {
   });
 });
 
+describe('AgentRuntime.getSession', () => {
+  it('returns the persisted session metadata for the requested session id without changing runtime state', async () => {
+    const { runtime } = await createRuntimeHarness(cleanup);
+
+    const firstTurn = await runtime.prompt('first');
+    await firstTurn.completion;
+    await runtime.stop();
+
+    const secondTurn = await runtime.prompt('second');
+    await secondTurn.completion;
+
+    const session = await runtime.getSession(firstTurn.sessionId);
+
+    expect(session.id).toBe(firstTurn.sessionId);
+    expect(session.firstMessage).toBe('first');
+    expect(runtime.getState()).toBe('ready');
+  });
+
+  it('fails when the requested persisted session does not exist', async () => {
+    const { runtime } = await createRuntimeHarness(cleanup);
+
+    await expect(runtime.getSession('missing-session')).rejects.toBeInstanceOf(SessionNotFoundError);
+  });
+});
+
 describe('AgentRuntime.deleteSession', () => {
   it('deletes a persisted session and disposes the open in-memory session when it matches', async () => {
     const { runtime, getSession, hasSession } = await createRuntimeHarness(cleanup);

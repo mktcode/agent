@@ -161,13 +161,19 @@ export class AgentRuntime {
     return [...sessions].sort((left, right) => left.id.localeCompare(right.id));
   }
 
+  public async getSession(sessionId: string): Promise<AgentRuntimeSessionInfo> {
+    const session = (await this.listSessions()).find((entry) => entry.id === sessionId);
+
+    if (!session) {
+      throw new SessionNotFoundError({ sessionId });
+    }
+
+    return session;
+  }
+
   public async deleteSession(sessionId: string): Promise<void> {
     await this.#workspace.runExclusive(async () => {
-      const session = (await this.listSessions()).find((entry) => entry.id === sessionId);
-
-      if (!session) {
-        throw new SessionNotFoundError({ sessionId });
-      }
+      const session = await this.getSession(sessionId);
 
       if (this.#session?.sessionId === sessionId) {
         this.#destroySession(this.#session);

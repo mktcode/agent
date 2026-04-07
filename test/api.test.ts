@@ -24,6 +24,7 @@ interface GitServiceStub {
 interface AgentRuntimeStub {
   prompt: ReturnType<typeof vi.fn>;
   listSessions: ReturnType<typeof vi.fn>;
+  getSession: ReturnType<typeof vi.fn>;
   deleteSession: ReturnType<typeof vi.fn>;
   subscribe: ReturnType<typeof vi.fn>;
 }
@@ -63,6 +64,7 @@ function createServer() {
   const agentRuntime: AgentRuntimeStub = {
     prompt: vi.fn(async () => ({ sessionId: 'session-1', completion: Promise.resolve() })),
     listSessions: vi.fn(async () => [createSessionInfo('session-2'), createSessionInfo('session-1')]),
+    getSession: vi.fn(async (sessionId: string) => createSessionInfo(sessionId)),
     deleteSession: vi.fn(async () => undefined),
     subscribe: vi.fn(() => () => undefined),
   };
@@ -386,6 +388,32 @@ describe('API delegation', () => {
       ],
     });
     expect(agentRuntime.listSessions).toHaveBeenCalledTimes(1);
+  });
+
+  it('delegates single-session lookup directly to the runtime', async () => {
+    const { server, agentRuntime } = createServer();
+
+    const response = await server.inject({
+      method: 'GET',
+      url: '/agent/session/session-9',
+      headers: authorizedHeaders(),
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({
+      session: {
+        path: '/tmp/session-9.jsonl',
+        id: 'session-9',
+        cwd: '/tmp/workspace',
+        name: 'Session session-9',
+        created: '2024-01-01T00:00:00.000Z',
+        modified: '2024-01-02T00:00:00.000Z',
+        messageCount: 1,
+        firstMessage: 'first session-9',
+        allMessagesText: 'first session-9',
+      },
+    });
+    expect(agentRuntime.getSession).toHaveBeenCalledWith('session-9');
   });
 
   it('delegates session deletion directly to the runtime', async () => {
