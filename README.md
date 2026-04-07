@@ -45,7 +45,7 @@ npm start
 # Or with explicit env vars:
 HOST=127.0.0.1 PORT=3000 AUTH_TOKEN=secret-token REPO_URL=/absolute/path/to/repository npm start
 
-# Watche files in `src/`,
+# Watch files in `src/`,
 npm run dev
 ```
 
