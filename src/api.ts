@@ -16,6 +16,16 @@ export interface ApiServerOptions {
   authToken: string;
   gitService: Pick<GitService, 'getStatus' | 'listBranches' | 'checkout' | 'merge' | 'push' | 'revert' | 'deleteBranch'>;
   agentRuntime: Pick<AgentRuntime, 'prompt' | 'listSessions' | 'getSession' | 'getSessionEntries' | 'getSessionItems' | 'deleteSession' | 'subscribe' | 'subscribeUi'>;
+  logger?: ApiLogger;
+}
+
+export interface ApiLogger {
+  error(context: {
+    method: string;
+    url: string;
+    statusCode: number;
+    error?: unknown;
+  }, message: string): void;
 }
 
 export interface AgentSessionsResponse {
@@ -71,6 +81,7 @@ class UnauthorizedApiError extends Error {
 }
 
 export function createApiServer(options: ApiServerOptions): FastifyInstance {
+  const logger = options.logger ?? createDefaultLogger();
   const server = Fastify();
 
   server.addHook('onRequest', async (request) => {
@@ -79,6 +90,16 @@ export function createApiServer(options: ApiServerOptions): FastifyInstance {
 
   server.setErrorHandler((error, _request, reply) => {
     const { statusCode, body } = mapError(error);
+
+    logger.error(
+      {
+        method: _request.method,
+        url: _request.url,
+        statusCode,
+        error,
+      },
+      'API request failed',
+    );
 
     reply.status(statusCode).send({ error: body });
   });
@@ -340,6 +361,14 @@ function isFastifyClientError(error: unknown): error is Error & { statusCode: nu
     && typeof error.statusCode === 'number'
     && error.statusCode < 500
   );
+}
+
+function createDefaultLogger(): ApiLogger {
+  return {
+    error(context, message) {
+      console.error(message, context);
+    },
+  };
 }
 
 export async function streamAgentPromptResponse(

@@ -19,6 +19,7 @@ The API layer:
 * Calls the appropriate module
 * Maps results and errors to HTTP responses
 * Streams agent events over SSE for prompt requests
+* Logs failed HTTP requests with basic request context
 
 It must not:
 
@@ -26,6 +27,22 @@ It must not:
 * Manage locks
 * Interpret agent events
 * Modify behavior of underlying modules
+
+---
+
+## Logging
+
+The API layer must remain mostly silent for successful requests.
+
+It must log failed HTTP requests once after the response is determined.
+
+Each log entry must include:
+
+* HTTP method
+* Request URL
+* Response status code
+
+If the failure originated from a thrown error, the log must also include the error object.
 
 ---
 

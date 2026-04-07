@@ -32,6 +32,10 @@ interface AgentRuntimeStub {
   subscribeUi: ReturnType<typeof vi.fn>;
 }
 
+interface ApiLoggerStub {
+  error: ReturnType<typeof vi.fn>;
+}
+
 function createSessionInfo(id: string): SessionInfo {
   return {
     path: `/tmp/${id}.jsonl`,
@@ -74,16 +78,20 @@ function createServer() {
     subscribe: vi.fn(() => () => undefined),
     subscribeUi: vi.fn(() => () => undefined),
   };
+  const logger: ApiLoggerStub = {
+    error: vi.fn(),
+  };
 
   const server = createApiServer({
     authToken: 'secret-token',
     gitService,
     agentRuntime,
+    logger,
   });
 
   servers.push(server);
 
-  return { server, gitService, agentRuntime };
+  return { server, gitService, agentRuntime, logger };
 }
 
 function authorizedHeaders() {
@@ -490,6 +498,19 @@ describe('API delegation', () => {
 });
 
 describe('API error mapping', () => {
+  it('keeps successful requests silent', async () => {
+    const { server, logger } = createServer();
+
+    const response = await server.inject({
+      method: 'GET',
+      url: '/git/status',
+      headers: authorizedHeaders(),
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(logger.error).not.toHaveBeenCalled();
+  });
+
   it('maps lock contention to 409 conflict', async () => {
     const { server, gitService } = createServer();
 
@@ -731,9 +752,11 @@ describe('API error mapping', () => {
   });
 
   it('maps unexpected errors to 500 internal server error', async () => {
-    const { server, gitService } = createServer();
+    const { server, gitService, logger } = createServer();
 
-    gitService.push.mockRejectedValueOnce(new Error('boom'));
+    const error = new Error('boom');
+
+    gitService.push.mockRejectedValueOnce(error);
 
     const response = await server.inject({
       method: 'POST',
@@ -752,5 +775,15 @@ describe('API error mapping', () => {
         message: 'Internal server error.',
       },
     });
+    expect(logger.error).toHaveBeenCalledTimes(1);
+    expect(logger.error).toHaveBeenCalledWith(
+      {
+        method: 'POST',
+        url: '/git/push',
+        statusCode: 500,
+        error,
+      },
+      'API request failed',
+    );
   });
 });
