@@ -385,7 +385,11 @@ export async function streamAgentPromptResponse(
 
   let closed = false;
 
-  const unsubscribe = (format === 'ui' ? agentRuntime.subscribeUi : agentRuntime.subscribe)((event) => {
+  const subscribeToRuntime = format === 'ui'
+    ? (listener: (event: unknown) => void) => agentRuntime.subscribeUi(listener)
+    : (listener: (event: unknown) => void) => agentRuntime.subscribe(listener);
+
+  const unsubscribe = subscribeToRuntime((event) => {
     if (closed || response.destroyed || response.writableEnded) {
       return;
     }

@@ -1,3 +1,4 @@
+import { AgentRuntime } from '../src/agent-runtime';
 import type { FastifyInstance } from 'fastify';
 import type { SessionInfo } from '@mariozechner/pi-coding-agent';
 
@@ -9,7 +10,16 @@ import {
   SessionNotFoundError,
   ValidationError,
 } from '../src/errors';
-import { ControlledEventSource, assertEventSequence, createDeferred, createReply } from './harness';
+import { WorkspaceManager } from '../src/workspace';
+import {
+  ControlledAgentSession,
+  ControlledEventSource,
+  assertEventSequence,
+  createCleanupRegistry,
+  createDeferred,
+  createReply,
+  createTempWorkspacePath,
+} from './harness';
 
 interface GitServiceStub {
   getStatus: ReturnType<typeof vi.fn>;
@@ -640,6 +650,45 @@ describe('API error mapping', () => {
 
     expect(agentRuntime.subscribeUi).toHaveBeenCalledTimes(1);
     assertEventSequence(reply.raw.writes, [`data: ${JSON.stringify(itemEvent)}\n\n`]);
+  });
+
+  it('streams prompt events from a real runtime instance without losing method context', async () => {
+    const cleanup = createCleanupRegistry();
+
+    try {
+      const workspacePath = await createTempWorkspacePath(cleanup, 'nextagent-api-stream-');
+      const workspace = new WorkspaceManager({ repoUrl: '/tmp/unused', workspacePath });
+      const session = new ControlledAgentSession('session-1');
+      const gate = session.queuePrompt();
+      const runtime = new AgentRuntime({
+        workspace,
+        workspacePath,
+        createSession: async () => session,
+        listSessions: async () => [],
+        deletePersistedSession: async () => undefined,
+        readSessionEntries: async () => [],
+      });
+      const reply = createReply();
+
+      const streamPromise = streamAgentPromptResponse({
+        agentRuntime: runtime,
+        prompt: 'Implement the feature',
+        reply,
+      });
+
+      await session.promptStartedSignals[0];
+
+      const event = { type: 'reasoning', text: 'first' };
+      session.emit(event);
+      gate.resolve();
+
+      await streamPromise;
+
+      expect(reply.raw.headers.get('X-Agent-Session-Id')).toBe('session-1');
+      assertEventSequence(reply.raw.writes, [`data: ${JSON.stringify(event)}\n\n`]);
+    } finally {
+      await cleanup.runAll();
+    }
   });
 
   it('streams only events emitted after subscription', async () => {
