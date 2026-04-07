@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 import { expect } from 'vitest';
-import type { SessionInfo } from '@mariozechner/pi-coding-agent';
+import type { SessionEntry, SessionInfo } from '@mariozechner/pi-coding-agent';
 
 import {
   AgentRuntime,
@@ -191,6 +191,7 @@ export interface RuntimeHarness {
   createSessionCalls: CreateAgentRuntimeSessionOptions[];
   hasSession(sessionId: string): boolean;
   listPersistedSessions(): SessionInfo[];
+  getSessionEntries(sessionId: string): SessionEntry[];
   getSession(sessionId: string): ControlledAgentSession;
 }
 
@@ -201,6 +202,7 @@ export async function createRuntimeHarness(
   const workspacePath = await createTempWorkspacePath(cleanup, prefix);
   const workspace = new WorkspaceManager({ repoUrl: '/tmp/unused', workspacePath });
   const sessions = new Map<string, ControlledAgentSession>();
+  const sessionEntries = new Map<string, SessionEntry[]>();
   const createSessionCalls: CreateAgentRuntimeSessionOptions[] = [];
   const sessionStoragePath = path.join(path.dirname(workspacePath), '.pi', 'sessions');
 
@@ -220,6 +222,7 @@ export async function createRuntimeHarness(
     const sessionId = `session-${sessions.size + 1}`;
     const session = new ControlledAgentSession(sessionId);
     sessions.set(sessionId, session);
+    sessionEntries.set(sessionId, []);
     return session;
   };
 
@@ -239,6 +242,17 @@ export async function createRuntimeHarness(
 
   const deletePersistedSession = async ({ session }: { session: SessionInfo }): Promise<void> => {
     sessions.delete(session.id);
+    sessionEntries.delete(session.id);
+  };
+
+  const readSessionEntries = async ({ session }: { session: SessionInfo }): Promise<SessionEntry[]> => {
+    const entries = sessionEntries.get(session.id);
+
+    if (!entries) {
+      throw new SessionNotFoundError({ sessionId: session.id });
+    }
+
+    return entries;
   };
 
   return {
@@ -248,6 +262,7 @@ export async function createRuntimeHarness(
       createSession,
       listSessions,
       deletePersistedSession,
+      readSessionEntries,
     }),
     workspace,
     workspacePath,
@@ -268,6 +283,15 @@ export async function createRuntimeHarness(
         firstMessage: session.prompts[0] ?? '',
         allMessagesText: session.prompts.join('\n'),
       }));
+    },
+    getSessionEntries(sessionId: string): SessionEntry[] {
+      const entries = sessionEntries.get(sessionId);
+
+      if (!entries) {
+        throw new Error(`Unknown controlled session entries: ${sessionId}`);
+      }
+
+      return entries;
     },
     getSession(sessionId: string): ControlledAgentSession {
       const session = sessions.get(sessionId);

@@ -36,14 +36,16 @@ The module owns:
 * Triggering agent execution per turn
 * Using the workspace lock for turn execution and persisted session deletion
 * Forwarding agent events transparently
+* Projecting live agent events into UI session items when requested
+* Reading current-branch persisted session history
 * Listing and deleting persisted sessions
 
 It must not:
 
 * Implement agent behavior
 * Modify or inject tools
-* Interpret or transform agent events
 * Execute multiple sessions concurrently
+* Persist a second history format separate from PI session files
 
 ---
 
@@ -113,6 +115,34 @@ Behavior:
 * If no such session exists → throw `SessionNotFoundError`
 * Do not modify runtime state
 
+### `getSessionEntries(sessionId: string): Promise<unknown[]>`
+
+Returns raw persisted PI session entries for the session's current leaf.
+
+Behavior:
+
+* Resolve the persisted session matching `sessionId`
+* Open the persisted PI session from `./.pi/sessions`
+* Read the session's current leaf / active branch as defined by PI session state
+* Return raw PI session entries in chronological order from root to that leaf
+* Exclude the session header from the returned items
+* If no such session exists → throw `SessionNotFoundError`
+* Do not modify runtime state
+
+### `getSessionItems(sessionId: string): Promise<UiSessionItem[]>`
+
+Returns UI-projected persisted session items for the session's current leaf.
+
+Behavior:
+
+* Resolve the persisted session matching `sessionId`
+* Read raw persisted entries for the session's current leaf
+* Project supported entries into final `UiSessionItem` objects for a minimal chat UI
+* Return items in chronological order
+* Omit persisted entries that do not map to the minimal chat UI
+* If no such session exists → throw `SessionNotFoundError`
+* Do not modify runtime state
+
 ### `deleteSession(sessionId: string): Promise<void>`
 
 Deletes the persisted session matching `sessionId`.
@@ -168,6 +198,16 @@ Registers a listener for agent events.
 * No buffering or replay
 * Events delivered in real time
 
+### `subscribeUi(listener: (event: UiSessionItemEvent) => void): void`
+
+Registers a listener for UI-projected live turn items.
+
+* Multiple listeners allowed
+* No replay
+* Each event contains a full snapshot of one `UiSessionItem`
+* Repeated events with the same item ID replace the previous snapshot for that item
+* UI updates are emitted as relevant PI updates arrive
+
 ---
 
 ## Execution Model
@@ -210,18 +250,29 @@ Access outside this directory is not allowed.
 
 ## Event Handling
 
-The runtime must forward PI agent events **unchanged**.
+For raw subscriptions, the runtime must forward PI agent events **unchanged**.
 
 Constraints:
 
-* No transformation of event structure
-* No filtering or aggregation
-* No reordering
-* No buffering or replay
+* `subscribe()` must not transform event structure
+* `subscribe()` must not filter or aggregate events
+* `subscribe()` must not reorder events
+* `subscribe()` must not buffer or replay events
 
-Events are treated as opaque data and passed directly to subscribers.
+Events for `subscribe()` are treated as opaque data and passed directly to subscribers.
 
 If the loaded session changes between turns, subscriptions remain attached to the runtime and receive events from the next executing turn without replay.
+
+For UI subscriptions, the runtime must derive `UiSessionItemEvent` values from PI events using these rules:
+
+* User messages and completed persisted messages become final UI items
+* Assistant text output is projected as `message` items
+* Assistant thinking output is projected as `thinking` items
+* Tool-call, tool-execution, tool-result, and bash-execution activity is projected as `tool` items
+* Assistant `text_delta`, `thinking_delta`, and `toolcall_delta` events update in-progress UI items keyed by stable item IDs and are emitted immediately
+* PI-specific entries not needed for a minimal chat UI are omitted from UI projection
+* UI events must not include raw PI event payloads
+* UI projection must not modify raw runtime behavior or persisted session files
 
 ---
 
@@ -260,6 +311,7 @@ No abrupt termination without cleanup.
 * This module must use the PI SDK's file-backed session manager APIs
 * Session files must be stored in `./.pi/sessions`
 * This module must not define a second session storage format or duplicate session history
+* UI session items are derived on demand from PI data and are never persisted separately
 
 The runtime manages only **live execution state** plus selection of which persisted PI session to load for a turn.
 
@@ -270,9 +322,9 @@ Transport disconnects do not alter runtime execution state.
 ## Non-Goals
 
 * No parallel execution
-* No history querying
 * No tool injection or modification
 * No session metadata store separate from PI session files
+* No persisted cache of UI-projected items
 
 ---
 

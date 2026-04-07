@@ -25,8 +25,11 @@ interface AgentRuntimeStub {
   prompt: ReturnType<typeof vi.fn>;
   listSessions: ReturnType<typeof vi.fn>;
   getSession: ReturnType<typeof vi.fn>;
+  getSessionEntries: ReturnType<typeof vi.fn>;
+  getSessionItems: ReturnType<typeof vi.fn>;
   deleteSession: ReturnType<typeof vi.fn>;
   subscribe: ReturnType<typeof vi.fn>;
+  subscribeUi: ReturnType<typeof vi.fn>;
 }
 
 function createSessionInfo(id: string): SessionInfo {
@@ -65,8 +68,11 @@ function createServer() {
     prompt: vi.fn(async () => ({ sessionId: 'session-1', completion: Promise.resolve() })),
     listSessions: vi.fn(async () => [createSessionInfo('session-2'), createSessionInfo('session-1')]),
     getSession: vi.fn(async (sessionId: string) => createSessionInfo(sessionId)),
+    getSessionEntries: vi.fn(async () => [{ type: 'message' }]),
+    getSessionItems: vi.fn(async (sessionId: string) => [{ id: `${sessionId}:message`, sessionId, timestamp: '2024-01-01T00:00:00.000Z', kind: 'message', status: 'final', role: 'assistant', text: 'hello', isError: false }]),
     deleteSession: vi.fn(async () => undefined),
     subscribe: vi.fn(() => () => undefined),
+    subscribeUi: vi.fn(() => () => undefined),
   };
 
   const server = createApiServer({
@@ -220,6 +226,23 @@ describe('API validation', () => {
 
     expect(response.statusCode).toBe(200);
     expect(agentRuntime.prompt).toHaveBeenCalledWith('Continue', 'session-123');
+  });
+
+  it('accepts an optional format for prompt requests', async () => {
+    const { server, agentRuntime } = createServer();
+
+    const response = await server.inject({
+      method: 'POST',
+      url: '/agent/prompt',
+      headers: authorizedHeaders(),
+      payload: {
+        prompt: 'Continue',
+        format: 'ui',
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(agentRuntime.prompt).toHaveBeenCalledWith('Continue', undefined);
   });
 
   it('requires a string session id for session deletion', async () => {
@@ -432,6 +455,38 @@ describe('API delegation', () => {
     expect(response.json()).toEqual({});
     expect(agentRuntime.deleteSession).toHaveBeenCalledWith('session-9');
   });
+
+  it('delegates session item lookup directly to the runtime in raw format by default', async () => {
+    const { server, agentRuntime } = createServer();
+
+    const response = await server.inject({
+      method: 'GET',
+      url: '/agent/session/session-9/items',
+      headers: authorizedHeaders(),
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({
+      items: [{ type: 'message' }],
+    });
+    expect(agentRuntime.getSessionEntries).toHaveBeenCalledWith('session-9');
+  });
+
+  it('delegates session item lookup directly to the runtime in ui format when requested', async () => {
+    const { server, agentRuntime } = createServer();
+
+    const response = await server.inject({
+      method: 'GET',
+      url: '/agent/session/session-9/items?format=ui',
+      headers: authorizedHeaders(),
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({
+      items: [{ id: 'session-9:message', sessionId: 'session-9', timestamp: '2024-01-01T00:00:00.000Z', kind: 'message', status: 'final', role: 'assistant', text: 'hello', isError: false }],
+    });
+    expect(agentRuntime.getSessionItems).toHaveBeenCalledWith('session-9');
+  });
 });
 
 describe('API error mapping', () => {
@@ -488,6 +543,7 @@ describe('API error mapping', () => {
     const completion = createDeferred<void>();
     const agentRuntime = {
       subscribe: vi.fn((listener: (event: unknown) => void) => eventSource.subscribe(listener)),
+      subscribeUi: vi.fn(() => () => undefined),
       prompt: vi.fn(async (prompt: string, sessionId?: string) => ({
         sessionId: sessionId ?? 'session-1',
         completion: completion.promise,
@@ -522,12 +578,56 @@ describe('API error mapping', () => {
     ]);
   });
 
+  it('streams ui prompt items from the ui runtime subscription when requested', async () => {
+    const eventSource = new ControlledEventSource();
+    const reply = createReply();
+    const completion = createDeferred<void>();
+    const agentRuntime = {
+      subscribe: vi.fn(() => () => undefined),
+      subscribeUi: vi.fn((listener: (event: unknown) => void) => eventSource.subscribe(listener)),
+      prompt: vi.fn(async () => ({
+        sessionId: 'session-1',
+        completion: completion.promise,
+      })),
+    };
+
+    const streamPromise = streamAgentPromptResponse({
+      agentRuntime,
+      prompt: 'Implement the feature',
+      format: 'ui',
+      reply,
+    });
+
+    const itemEvent = {
+      type: 'session_item',
+      item: {
+        id: 'session-1:message',
+        sessionId: 'session-1',
+        timestamp: '2024-01-01T00:00:00.000Z',
+        kind: 'message',
+        status: 'streaming',
+        role: 'assistant',
+        text: 'hello',
+        isError: false,
+      },
+    };
+
+    eventSource.emit(itemEvent);
+    completion.resolve();
+
+    await streamPromise;
+
+    expect(agentRuntime.subscribeUi).toHaveBeenCalledTimes(1);
+    assertEventSequence(reply.raw.writes, [`data: ${JSON.stringify(itemEvent)}\n\n`]);
+  });
+
   it('streams only events emitted after subscription', async () => {
     const eventSource = new ControlledEventSource();
     const reply = createReply();
     const completion = createDeferred<void>();
     const agentRuntime = {
       subscribe: vi.fn((listener: (event: unknown) => void) => eventSource.subscribe(listener)),
+      subscribeUi: vi.fn(() => () => undefined),
       prompt: vi.fn(async () => ({
         sessionId: 'session-9',
         completion: completion.promise,
@@ -558,6 +658,7 @@ describe('API error mapping', () => {
     const completion = createDeferred<void>();
     const agentRuntime = {
       subscribe: vi.fn((listener: (event: unknown) => void) => eventSource.subscribe(listener)),
+      subscribeUi: vi.fn(() => () => undefined),
       prompt: vi.fn(async () => ({
         sessionId: 'session-1',
         completion: completion.promise,
@@ -588,6 +689,7 @@ describe('API error mapping', () => {
     const reply = createReply();
     const agentRuntime = {
       subscribe: vi.fn(() => () => undefined),
+      subscribeUi: vi.fn(() => () => undefined),
       prompt: vi.fn(async () => {
         throw new Error('boom');
       }),

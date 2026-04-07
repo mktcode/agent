@@ -136,6 +136,7 @@ Agent transport uses dedicated HTTP endpoints:
 * `POST /agent/prompt`
 * `GET /agent/sessions`
 * `GET /agent/session/:sessionId`
+* `GET /agent/session/:sessionId/items`
 * `DELETE /agent/session`
 
 Only `POST /agent/prompt` executes the agent.
@@ -146,6 +147,13 @@ That request both:
 * streams live agent events back to the client via SSE
 
 The other agent endpoints only inspect or delete persisted PI sessions.
+
+Endpoints that return turn or history data may expose either:
+
+* a PI-native raw format
+* a UI-projected format derived from PI data
+
+PI session files remain the single source of truth. No second persisted history format is introduced.
 
 ---
 

@@ -3,15 +3,19 @@ import Fastify, { type FastifyInstance, type FastifyRequest } from 'fastify';
 import {
   type AgentRuntime,
   type AgentRuntimePromptResult,
+  type AgentRuntimeSessionEntry,
   type AgentRuntimeSessionInfo,
+  type UiSessionItem,
 } from './agent-runtime';
 import { AppError, LockUnavailableError, ValidationError } from './errors';
 import { type GitService } from './git-service';
 
+export type AgentResponseFormat = 'raw' | 'ui';
+
 export interface ApiServerOptions {
   authToken: string;
   gitService: Pick<GitService, 'getStatus' | 'listBranches' | 'checkout' | 'merge' | 'push' | 'revert' | 'deleteBranch'>;
-  agentRuntime: Pick<AgentRuntime, 'prompt' | 'listSessions' | 'getSession' | 'deleteSession' | 'subscribe'>;
+  agentRuntime: Pick<AgentRuntime, 'prompt' | 'listSessions' | 'getSession' | 'getSessionEntries' | 'getSessionItems' | 'deleteSession' | 'subscribe' | 'subscribeUi'>;
 }
 
 export interface AgentSessionsResponse {
@@ -20,6 +24,10 @@ export interface AgentSessionsResponse {
 
 export interface AgentSessionResponse {
   session: AgentRuntimeSessionInfo;
+}
+
+export interface AgentSessionItemsResponse {
+  items: AgentRuntimeSessionEntry[] | UiSessionItem[];
 }
 
 export interface AgentEventSource {
@@ -44,9 +52,10 @@ export interface AgentPromptStreamReply {
 }
 
 export interface StreamAgentPromptResponseOptions {
-  agentRuntime: Pick<AgentRuntime, 'prompt' | 'subscribe'>;
+  agentRuntime: Pick<AgentRuntime, 'prompt' | 'subscribe' | 'subscribeUi'>;
   prompt: string;
   sessionId?: string;
+  format?: AgentResponseFormat;
   reply: AgentPromptStreamReply;
 }
 
@@ -124,12 +133,14 @@ export function createApiServer(options: ApiServerOptions): FastifyInstance {
   });
 
   server.post('/agent/prompt', async (request, reply) => {
-    const { prompt, sessionId } = validateStringBody(request.body, ['prompt'], ['sessionId']);
+    const { prompt, sessionId, format } = validateStringBody(request.body, ['prompt'], ['sessionId', 'format']);
+    const responseFormat = validateAgentResponseFormat(format);
 
     await streamAgentPromptResponse({
       agentRuntime: options.agentRuntime,
       prompt,
       sessionId,
+      format: responseFormat,
       reply: reply as unknown as AgentPromptStreamReply,
     });
   });
@@ -144,6 +155,22 @@ export function createApiServer(options: ApiServerOptions): FastifyInstance {
     const session = await options.agentRuntime.getSession(sessionId);
 
     return { session };
+  });
+
+  server.get('/agent/session/:sessionId/items', async (request): Promise<AgentSessionItemsResponse> => {
+    const { sessionId } = validateStringParams(request.params, ['sessionId']);
+    const { format } = validateStringQuery(request.query, ['format']);
+    const responseFormat = validateAgentResponseFormat(format);
+
+    if (responseFormat === 'ui') {
+      return {
+        items: await options.agentRuntime.getSessionItems(sessionId),
+      };
+    }
+
+    return {
+      items: await options.agentRuntime.getSessionEntries(sessionId),
+    };
   });
 
   server.delete('/agent/session', async (request, reply) => {
@@ -179,6 +206,13 @@ function validateStringParams(
   optionalKeys: string[] = [],
 ): StringBodyShape {
   return validateStringRecord(params, requiredKeys, optionalKeys);
+}
+
+function validateStringQuery(
+  query: unknown,
+  optionalKeys: string[] = [],
+): StringBodyShape {
+  return validateStringRecord(query, [], optionalKeys);
 }
 
 function validateStringRecord(
@@ -218,6 +252,20 @@ function validateStringRecord(
   }
 
   return value as StringBodyShape;
+}
+
+function validateAgentResponseFormat(format: string | undefined): AgentResponseFormat {
+  if (format === undefined) {
+    return 'raw';
+  }
+
+  if (format === 'raw' || format === 'ui') {
+    return format;
+  }
+
+  throw new ValidationError('Invalid request body.', {
+    issues: ['format must be one of: raw, ui'],
+  });
 }
 
 function validateEmptyBody(body: unknown): void {
@@ -301,13 +349,14 @@ export async function streamAgentPromptResponse(
     agentRuntime,
     prompt,
     sessionId,
+    format = 'raw',
     reply,
   } = options;
   const response = reply.raw;
 
   let closed = false;
 
-  const unsubscribe = agentRuntime.subscribe((event) => {
+  const unsubscribe = (format === 'ui' ? agentRuntime.subscribeUi : agentRuntime.subscribe)((event) => {
     if (closed || response.destroyed || response.writableEnded) {
       return;
     }

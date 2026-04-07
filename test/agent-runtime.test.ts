@@ -203,6 +203,122 @@ describe('AgentRuntime.getSession', () => {
   });
 });
 
+describe('AgentRuntime.getSessionEntries', () => {
+  it('returns current-branch persisted entries for the requested session id', async () => {
+    const { runtime, getSessionEntries } = await createRuntimeHarness(cleanup);
+
+    const turn = await runtime.prompt('first');
+    await turn.completion;
+
+    const entries = await runtime.getSessionEntries(turn.sessionId);
+
+    expect(entries).toEqual(getSessionEntries(turn.sessionId));
+  });
+});
+
+describe('AgentRuntime.getSessionItems', () => {
+  it('projects persisted entries into minimal chat ui items', async () => {
+    const { runtime, getSessionEntries } = await createRuntimeHarness(cleanup);
+
+    const turn = await runtime.prompt('first');
+    await turn.completion;
+
+    const entries = getSessionEntries(turn.sessionId);
+    entries.push(
+      {
+        type: 'message',
+        id: 'user-1',
+        parentId: null,
+        timestamp: '2024-01-01T00:00:00.000Z',
+        message: {
+          role: 'user',
+          content: [{ type: 'text', text: 'hello' }],
+          timestamp: 1704067200000,
+        },
+      },
+      {
+        type: 'message',
+        id: 'assistant-1',
+        parentId: 'user-1',
+        timestamp: '2024-01-01T00:00:01.000Z',
+        message: {
+          role: 'assistant',
+          content: [
+            { type: 'thinking', thinking: 'thinking' },
+            { type: 'text', text: 'answer' },
+            { type: 'toolCall', id: 'call-1', name: 'read_file', arguments: { file: 'a.txt' } },
+          ],
+          api: 'openai-responses',
+          provider: 'openai',
+          model: 'gpt-5.4-mini',
+          usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
+          stopReason: 'toolUse',
+          timestamp: 1704067201000,
+        },
+      },
+      {
+        type: 'message',
+        id: 'tool-1',
+        parentId: 'assistant-1',
+        timestamp: '2024-01-01T00:00:02.000Z',
+        message: {
+          role: 'toolResult',
+          toolCallId: 'call-1',
+          toolName: 'read_file',
+          content: [{ type: 'text', text: 'file content' }],
+          isError: true,
+          timestamp: 1704067202000,
+        },
+      },
+    );
+
+    const items = await runtime.getSessionItems(turn.sessionId);
+
+    expect(items).toEqual([
+      {
+        id: 'user-1:message',
+        sessionId: turn.sessionId,
+        timestamp: '2024-01-01T00:00:00.000Z',
+        kind: 'message',
+        status: 'final',
+        role: 'user',
+        text: 'hello',
+        isError: false,
+      },
+      {
+        id: 'assistant-1:thinking',
+        sessionId: turn.sessionId,
+        timestamp: '2024-01-01T00:00:01.000Z',
+        kind: 'thinking',
+        status: 'final',
+        text: 'thinking',
+        isError: false,
+      },
+      {
+        id: 'assistant-1:message',
+        sessionId: turn.sessionId,
+        timestamp: '2024-01-01T00:00:01.000Z',
+        kind: 'message',
+        status: 'final',
+        role: 'assistant',
+        text: 'answer',
+        isError: false,
+      },
+      {
+        id: 'call-1:tool',
+        sessionId: turn.sessionId,
+        timestamp: '2024-01-01T00:00:02.000Z',
+        kind: 'tool',
+        status: 'error',
+        toolName: 'read_file',
+        toolCallId: 'call-1',
+        text: 'file content',
+        isError: true,
+      },
+    ]);
+  });
+});
+
 describe('AgentRuntime.deleteSession', () => {
   it('deletes a persisted session and disposes the open in-memory session when it matches', async () => {
     const { runtime, getSession, hasSession } = await createRuntimeHarness(cleanup);
@@ -277,5 +393,164 @@ describe('AgentRuntime.subscribe', () => {
 
     assertEventSequence(first.events, [{ type: 'before-second-listener' }, event]);
     assertEventSequence(second.events, [event]);
+  });
+});
+
+describe('AgentRuntime.subscribeUi', () => {
+  it('projects assistant deltas and tool execution into minimal ui items', async () => {
+    const { runtime, getSession } = await createRuntimeHarness(cleanup);
+    const received = createEventCollector();
+
+    runtime.subscribeUi(received.listener);
+
+    const turn = await runtime.prompt('first');
+    await turn.completion;
+    const session = getSession(turn.sessionId);
+
+    session.emit({
+      type: 'message_start',
+      message: {
+        role: 'user',
+        content: [{ type: 'text', text: 'first' }],
+        timestamp: 1704067200000,
+      },
+    });
+    session.emit({
+      type: 'message_update',
+      message: {
+        role: 'assistant',
+        content: [{ type: 'thinking', thinking: 'plan' }, { type: 'text', text: 'hel' }],
+        api: 'openai-responses',
+        provider: 'openai',
+        model: 'gpt-5.4-mini',
+        usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
+        stopReason: 'toolUse',
+        timestamp: 1704067201000,
+      },
+      assistantMessageEvent: {
+        type: 'thinking_delta',
+        contentIndex: 0,
+        delta: 'plan',
+        partial: {
+          role: 'assistant',
+          content: [{ type: 'thinking', thinking: 'plan' }, { type: 'text', text: 'hel' }],
+          api: 'openai-responses',
+          provider: 'openai',
+          model: 'gpt-5.4-mini',
+          usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
+          stopReason: 'toolUse',
+          timestamp: 1704067201000,
+        },
+      },
+    });
+    session.emit({
+      type: 'message_update',
+      message: {
+        role: 'assistant',
+        content: [{ type: 'thinking', thinking: 'plan' }, { type: 'text', text: 'hello' }],
+        api: 'openai-responses',
+        provider: 'openai',
+        model: 'gpt-5.4-mini',
+        usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
+        stopReason: 'toolUse',
+        timestamp: 1704067201000,
+      },
+      assistantMessageEvent: {
+        type: 'text_delta',
+        contentIndex: 1,
+        delta: 'hello',
+        partial: {
+          role: 'assistant',
+          content: [{ type: 'thinking', thinking: 'plan' }, { type: 'text', text: 'hello' }],
+          api: 'openai-responses',
+          provider: 'openai',
+          model: 'gpt-5.4-mini',
+          usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
+          stopReason: 'toolUse',
+          timestamp: 1704067201000,
+        },
+      },
+    });
+    session.emit({
+      type: 'tool_execution_start',
+      toolCallId: 'call-1',
+      toolName: 'read_file',
+      args: { filePath: 'a.txt' },
+    });
+    session.emit({
+      type: 'tool_execution_end',
+      toolCallId: 'call-1',
+      toolName: 'read_file',
+      result: 'denied',
+      isError: true,
+    });
+
+    expect(received.events).toEqual([
+      {
+        type: 'session_item',
+        item: {
+          id: '1704067200000:user:message',
+          sessionId: turn.sessionId,
+          timestamp: '2024-01-01T00:00:00.000Z',
+          kind: 'message',
+          status: 'final',
+          role: 'user',
+          text: 'first',
+          isError: false,
+        },
+      },
+      {
+        type: 'session_item',
+        item: {
+          id: '1704067201000:assistant:thinking',
+          sessionId: turn.sessionId,
+          timestamp: '2024-01-01T00:00:01.000Z',
+          kind: 'thinking',
+          status: 'streaming',
+          text: 'plan',
+          isError: false,
+        },
+      },
+      {
+        type: 'session_item',
+        item: {
+          id: '1704067201000:assistant:message',
+          sessionId: turn.sessionId,
+          timestamp: '2024-01-01T00:00:01.000Z',
+          kind: 'message',
+          status: 'streaming',
+          role: 'assistant',
+          text: 'hello',
+          isError: false,
+        },
+      },
+      {
+        type: 'session_item',
+        item: {
+          id: 'call-1:tool',
+          sessionId: turn.sessionId,
+          timestamp: '2024-01-01T00:00:01.000Z',
+          kind: 'tool',
+          status: 'streaming',
+          toolName: 'read_file',
+          toolCallId: 'call-1',
+          isError: false,
+        },
+      },
+      {
+        type: 'session_item',
+        item: {
+          id: 'call-1:tool',
+          sessionId: turn.sessionId,
+          timestamp: '2024-01-01T00:00:01.000Z',
+          kind: 'tool',
+          status: 'error',
+          toolName: 'read_file',
+          toolCallId: 'call-1',
+          text: 'denied',
+          isError: true,
+        },
+      },
+    ]);
   });
 });
