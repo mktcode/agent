@@ -50,7 +50,7 @@ No exceptions. No partial access.
 
 All errors must be returned in the standard format:
 
-```json id="1q5mp3"
+```json
 {
   "error": {
     "code": "STRING_CODE",
