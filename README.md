@@ -161,3 +161,199 @@ curl -N -X POST http://127.0.0.1:3000/agent/prompt \
 Successful prompt responses include the effective session ID in the `X-Agent-Session-Id` response header.
 
 If the client disconnects while a prompt is running, the agent turn continues to completion.
+
+## React Example
+
+For a chat-style UI, use `format: "ui"` on `POST /agent/prompt` and `GET /agent/session/:sessionId/items?format=ui`.
+
+The important client rule is:
+
+- append a UI item the first time you see its `id`
+- replace the existing item when the same `id` appears again
+- do not move an existing item when it updates
+
+That gives stable ordering for mixed `message`, `thinking`, and `tool` items while still letting streaming updates replace earlier snapshots in place.
+
+```tsx
+import { useEffect, useRef, useState } from 'react';
+
+type UiSessionItem = {
+  id: string;
+  sessionId: string;
+  timestamp: string;
+  kind: 'message' | 'thinking' | 'tool';
+  status: 'streaming' | 'final' | 'error';
+  isError: boolean;
+  role?: 'user' | 'assistant';
+  text?: string;
+  toolName?: string;
+  toolCallId?: string;
+};
+
+type UiSessionItemEvent = {
+  type: 'session_item';
+  item: UiSessionItem;
+};
+
+const API_BASE_URL = 'http://127.0.0.1:3000';
+const AUTH_TOKEN = 'secret-token';
+
+export function AgentSessionView() {
+  const [sessionId, setSessionId] = useState<string | undefined>();
+  const [items, setItems] = useState<UiSessionItem[]>([]);
+  const [prompt, setPrompt] = useState('');
+  const abortRef = useRef<AbortController | null>(null);
+
+  useEffect(() => {
+    if (!sessionId) {
+      return;
+    }
+
+    let cancelled = false;
+
+    void fetch(`${API_BASE_URL}/agent/session/${sessionId}/items?format=ui`, {
+      headers: {
+        Authorization: `Bearer ${AUTH_TOKEN}`,
+      },
+    })
+      .then(async (response) => {
+        if (!response.ok) {
+          throw new Error(`Failed to load items: ${response.status}`);
+        }
+
+        const body = await response.json() as { items: UiSessionItem[] };
+
+        if (!cancelled) {
+          setItems(body.items);
+        }
+      })
+      .catch((error) => {
+        console.error(error);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [sessionId]);
+
+  async function submitPrompt(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    abortRef.current?.abort();
+    const abortController = new AbortController();
+    abortRef.current = abortController;
+
+    const response = await fetch(`${API_BASE_URL}/agent/prompt`, {
+      method: 'POST',
+      signal: abortController.signal,
+      headers: {
+        Authorization: `Bearer ${AUTH_TOKEN}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        prompt,
+        sessionId,
+        format: 'ui',
+      }),
+    });
+
+    if (!response.ok || !response.body) {
+      throw new Error(`Prompt failed: ${response.status}`);
+    }
+
+    const nextSessionId = response.headers.get('X-Agent-Session-Id') ?? undefined;
+
+    if (nextSessionId) {
+      setSessionId(nextSessionId);
+    }
+
+    setPrompt('');
+
+    for await (const sseEvent of readSseEvents<UiSessionItemEvent>(response.body)) {
+      if (sseEvent.type !== 'session_item') {
+        continue;
+      }
+
+      setItems((currentItems) => upsertSessionItem(currentItems, sseEvent.item));
+    }
+  }
+
+  return (
+    <div>
+      <div>
+        {items.map((item) => (
+          <div key={item.id}>
+            <strong>
+              {item.kind === 'tool'
+                ? `tool:${item.toolName ?? 'unknown'}`
+                : item.kind === 'thinking'
+                  ? 'thinking'
+                  : item.role}
+            </strong>
+            {' '}
+            <span>{item.text ?? ''}</span>
+            {item.status === 'streaming' ? ' ...' : ''}
+            {item.isError ? ' (error)' : ''}
+          </div>
+        ))}
+      </div>
+
+      <form onSubmit={(event) => void submitPrompt(event)}>
+        <input value={prompt} onChange={(event) => setPrompt(event.target.value)} />
+        <button type="submit">Send</button>
+      </form>
+    </div>
+  );
+}
+
+function upsertSessionItem(items: UiSessionItem[], nextItem: UiSessionItem): UiSessionItem[] {
+  const index = items.findIndex((item) => item.id === nextItem.id);
+
+  if (index === -1) {
+    return [...items, nextItem];
+  }
+
+  return items.map((item, itemIndex) => (itemIndex === index ? nextItem : item));
+}
+
+async function* readSseEvents<T>(stream: ReadableStream<Uint8Array>): AsyncGenerator<T> {
+  const reader = stream.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+
+      if (done) {
+        break;
+      }
+
+      buffer += decoder.decode(value, { stream: true });
+
+      while (true) {
+        const boundary = buffer.indexOf('\n\n');
+
+        if (boundary === -1) {
+          break;
+        }
+
+        const rawEvent = buffer.slice(0, boundary);
+        buffer = buffer.slice(boundary + 2);
+
+        const dataLine = rawEvent
+          .split('\n')
+          .find((line) => line.startsWith('data: '));
+
+        if (!dataLine) {
+          continue;
+        }
+
+        yield JSON.parse(dataLine.slice(6)) as T;
+      }
+    }
+  } finally {
+    reader.releaseLock();
+  }
+}
+```
