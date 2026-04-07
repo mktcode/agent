@@ -92,7 +92,7 @@ Returns all local branches.
 
 Response:
 
-```json id="7k4l5g"
+```json
 {
   "branches": ["main", "feature-x"]
 }
@@ -104,7 +104,7 @@ Response:
 
 Request:
 
-```json id="4k9q1y"
+```json
 {
   "branch": "string"
 }
@@ -116,7 +116,7 @@ Behavior:
 
 Response:
 
-```json id="b6r1n3"
+```json
 {}
 ```
 
@@ -126,7 +126,7 @@ Response:
 
 Request:
 
-```json id="v9j2mz"
+```json
 {
   "source": "string",
   "target": "string"
@@ -139,7 +139,7 @@ Behavior:
 
 Response:
 
-```json id="0xv6m7"
+```json
 {}
 ```
 
@@ -149,7 +149,7 @@ Response:
 
 Request:
 
-```json id="i2p7wq"
+```json
 {
   "branch": "string"
 }
@@ -161,7 +161,7 @@ Behavior:
 
 Response:
 
-```json id="o4d8ks"
+```json
 {}
 ```
 
@@ -171,7 +171,7 @@ Response:
 
 Request:
 
-```json id="9c3k1x"
+```json
 {
   "branch": "string"
 }
@@ -183,7 +183,7 @@ Behavior:
 
 Response:
 
-```json id="l5t2qn"
+```json
 {}
 ```
 
@@ -195,7 +195,7 @@ Response:
 
 Request:
 
-```json id="0xg1s2"
+```json
 {
   "prompt": "string",
   "sessionId": "string"
