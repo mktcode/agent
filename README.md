@@ -104,6 +104,22 @@ curl -X DELETE http://127.0.0.1:3000/git/branch \
   -d '{"branch":"feature-x"}'
 ```
 
+List sessions:
+
+```bash
+curl http://127.0.0.1:3000/agent/sessions \
+  -H 'Authorization: Bearer secret-token'
+```
+
+Delete a session:
+
+```bash
+curl -X DELETE http://127.0.0.1:3000/agent/session \
+  -H 'Authorization: Bearer secret-token' \
+  -H 'Content-Type: application/json' \
+  -d '{"sessionId":"<session-id>"}'
+```
+
 Run one agent prompt and stream live events:
 
 ```bash

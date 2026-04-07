@@ -5,7 +5,7 @@
 This module owns:
 
 * The `./.workspace` directory
-* The global mutex protecting it
+* The global mutex protecting workspace and project-local session mutations
 
 It is the **foundation of determinism** in the system. All higher-level modules depend on its correctness.
 
@@ -54,6 +54,7 @@ The lock covers:
 * All filesystem mutations inside `./.workspace`
 * All git operations
 * Entire agent execution lifecycle
+* Mutations to persisted PI sessions in `./.pi/sessions`
 
 The lock does **not** cover:
 

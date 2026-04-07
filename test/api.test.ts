@@ -1,4 +1,5 @@
 import type { FastifyInstance } from 'fastify';
+import type { SessionInfo } from '@mariozechner/pi-coding-agent';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -20,7 +21,23 @@ interface GitServiceStub {
 
 interface AgentRuntimeStub {
   prompt: ReturnType<typeof vi.fn>;
+  listSessions: ReturnType<typeof vi.fn>;
+  deleteSession: ReturnType<typeof vi.fn>;
   subscribe: ReturnType<typeof vi.fn>;
+}
+
+function createSessionInfo(id: string): SessionInfo {
+  return {
+    path: `/tmp/${id}.jsonl`,
+    id,
+    cwd: '/tmp/workspace',
+    name: `Session ${id}`,
+    created: new Date('2024-01-01T00:00:00.000Z'),
+    modified: new Date('2024-01-02T00:00:00.000Z'),
+    messageCount: 1,
+    firstMessage: `first ${id}`,
+    allMessagesText: `first ${id}`,
+  };
 }
 
 const servers: FastifyInstance[] = [];
@@ -41,6 +58,8 @@ function createServer() {
   };
   const agentRuntime: AgentRuntimeStub = {
     prompt: vi.fn(async () => ({ sessionId: 'session-1', completion: Promise.resolve() })),
+    listSessions: vi.fn(async () => [createSessionInfo('session-2'), createSessionInfo('session-1')]),
+    deleteSession: vi.fn(async () => undefined),
     subscribe: vi.fn(() => () => undefined),
   };
 
@@ -171,6 +190,29 @@ describe('API validation', () => {
     expect(response.statusCode).toBe(200);
     expect(agentRuntime.prompt).toHaveBeenCalledWith('Continue', 'session-123');
   });
+
+  it('requires a string session id for session deletion', async () => {
+    const { server, agentRuntime } = createServer();
+
+    const response = await server.inject({
+      method: 'DELETE',
+      url: '/agent/session',
+      headers: authorizedHeaders(),
+      payload: {},
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toEqual({
+      error: {
+        code: 'VALIDATION_ERROR',
+        message: 'Invalid request body.',
+        details: {
+          issues: ['sessionId must be a string'],
+        },
+      },
+    });
+    expect(agentRuntime.deleteSession).not.toHaveBeenCalled();
+  });
 });
 
 describe('API delegation', () => {
@@ -226,6 +268,62 @@ describe('API delegation', () => {
     expect(response.headers['content-type']).toContain('text/event-stream');
     expect(response.headers['x-agent-session-id']).toBe('session-1');
     expect(agentRuntime.prompt).toHaveBeenCalledWith('Implement the feature', 'session-9');
+  });
+
+  it('delegates session listing directly to the runtime', async () => {
+    const { server, agentRuntime } = createServer();
+
+    const response = await server.inject({
+      method: 'GET',
+      url: '/agent/sessions',
+      headers: authorizedHeaders(),
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({
+      sessions: [
+        {
+          path: '/tmp/session-2.jsonl',
+          id: 'session-2',
+          cwd: '/tmp/workspace',
+          name: 'Session session-2',
+          created: '2024-01-01T00:00:00.000Z',
+          modified: '2024-01-02T00:00:00.000Z',
+          messageCount: 1,
+          firstMessage: 'first session-2',
+          allMessagesText: 'first session-2',
+        },
+        {
+          path: '/tmp/session-1.jsonl',
+          id: 'session-1',
+          cwd: '/tmp/workspace',
+          name: 'Session session-1',
+          created: '2024-01-01T00:00:00.000Z',
+          modified: '2024-01-02T00:00:00.000Z',
+          messageCount: 1,
+          firstMessage: 'first session-1',
+          allMessagesText: 'first session-1',
+        },
+      ],
+    });
+    expect(agentRuntime.listSessions).toHaveBeenCalledTimes(1);
+  });
+
+  it('delegates session deletion directly to the runtime', async () => {
+    const { server, agentRuntime } = createServer();
+
+    const response = await server.inject({
+      method: 'DELETE',
+      url: '/agent/session',
+      headers: authorizedHeaders(),
+      payload: {
+        sessionId: 'session-9',
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({});
+    expect(agentRuntime.deleteSession).toHaveBeenCalledWith('session-9');
   });
 });
 

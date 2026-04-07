@@ -5,6 +5,7 @@ import {
   SessionBusyError,
   SessionNotFoundError,
 } from '../src/agent-runtime';
+import { LockUnavailableError } from '../src/errors';
 import {
   assertEventSequence,
   createCleanupRegistry,
@@ -156,6 +157,60 @@ describe('AgentRuntime.stop', () => {
     expect(runtime.getState()).toBe('idle');
     expect(workspace.isLocked()).toBe(false);
     expect(session.disposeCalls).toHaveLength(1);
+  });
+});
+
+describe('AgentRuntime.listSessions', () => {
+  it('returns persisted sessions sorted by session id without changing runtime state', async () => {
+    const { runtime } = await createRuntimeHarness(cleanup);
+
+    const firstTurn = await runtime.prompt('first');
+    await firstTurn.completion;
+    await runtime.stop();
+
+    const secondTurn = await runtime.prompt('second');
+    await secondTurn.completion;
+
+    const sessions = await runtime.listSessions();
+
+    expect(sessions.map((session) => session.id)).toEqual(['session-1', 'session-2']);
+    expect(runtime.getState()).toBe('ready');
+  });
+});
+
+describe('AgentRuntime.deleteSession', () => {
+  it('deletes a persisted session and disposes the open in-memory session when it matches', async () => {
+    const { runtime, getSession, hasSession } = await createRuntimeHarness(cleanup);
+
+    const turn = await runtime.prompt('first');
+    await turn.completion;
+    const session = getSession(turn.sessionId);
+
+    await runtime.deleteSession(turn.sessionId);
+
+    expect(hasSession(turn.sessionId)).toBe(false);
+    expect(session.disposeCalls).toHaveLength(1);
+    expect(runtime.getState()).toBe('idle');
+  });
+
+  it('fails when deleting an unknown persisted session', async () => {
+    const { runtime } = await createRuntimeHarness(cleanup);
+
+    await expect(runtime.deleteSession('missing-session')).rejects.toBeInstanceOf(SessionNotFoundError);
+  });
+
+  it('fails with lock contention while a turn is running', async () => {
+    const { runtime, getSession } = await createRuntimeHarness(cleanup);
+
+    const turn = await runtime.prompt('first');
+    const session = getSession(turn.sessionId);
+
+    await session.promptStartedSignals[0];
+
+    await expect(runtime.deleteSession(turn.sessionId)).rejects.toBeInstanceOf(LockUnavailableError);
+
+    session.promptGates[0]?.resolve();
+    await turn.completion;
   });
 });
 

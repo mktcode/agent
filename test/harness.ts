@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 import { expect } from 'vitest';
+import type { SessionInfo } from '@mariozechner/pi-coding-agent';
 
 import {
   AgentRuntime,
@@ -188,6 +189,8 @@ export interface RuntimeHarness {
   workspacePath: string;
   createSession: CreateAgentRuntimeSession;
   createSessionCalls: CreateAgentRuntimeSessionOptions[];
+  hasSession(sessionId: string): boolean;
+  listPersistedSessions(): SessionInfo[];
   getSession(sessionId: string): ControlledAgentSession;
 }
 
@@ -199,6 +202,7 @@ export async function createRuntimeHarness(
   const workspace = new WorkspaceManager({ repoUrl: '/tmp/unused', workspacePath });
   const sessions = new Map<string, ControlledAgentSession>();
   const createSessionCalls: CreateAgentRuntimeSessionOptions[] = [];
+  const sessionStoragePath = path.join(path.dirname(workspacePath), '.pi', 'sessions');
 
   const createSession: CreateAgentRuntimeSession = async (options) => {
     createSessionCalls.push(options);
@@ -219,16 +223,52 @@ export async function createRuntimeHarness(
     return session;
   };
 
+  const listSessions = async (): Promise<SessionInfo[]> => {
+    return Array.from(sessions.values()).reverse().map((session, index) => ({
+      path: path.join(sessionStoragePath, `${session.sessionId}.jsonl`),
+      id: session.sessionId,
+      cwd: workspacePath,
+      name: `Session ${session.sessionId}`,
+      created: new Date(`2024-01-0${index + 1}T00:00:00.000Z`),
+      modified: new Date(`2024-01-0${index + 1}T00:00:00.000Z`),
+      messageCount: session.prompts.length,
+      firstMessage: session.prompts[0] ?? '',
+      allMessagesText: session.prompts.join('\n'),
+    }));
+  };
+
+  const deletePersistedSession = async ({ session }: { session: SessionInfo }): Promise<void> => {
+    sessions.delete(session.id);
+  };
+
   return {
     runtime: new AgentRuntime({
       workspace,
       workspacePath,
       createSession,
+      listSessions,
+      deletePersistedSession,
     }),
     workspace,
     workspacePath,
     createSession,
     createSessionCalls,
+    hasSession(sessionId: string): boolean {
+      return sessions.has(sessionId);
+    },
+    listPersistedSessions(): SessionInfo[] {
+      return Array.from(sessions.values()).map((session, index) => ({
+        path: path.join(sessionStoragePath, `${session.sessionId}.jsonl`),
+        id: session.sessionId,
+        cwd: workspacePath,
+        name: `Session ${session.sessionId}`,
+        created: new Date(`2024-01-0${index + 1}T00:00:00.000Z`),
+        modified: new Date(`2024-01-0${index + 1}T00:00:00.000Z`),
+        messageCount: session.prompts.length,
+        firstMessage: session.prompts[0] ?? '',
+        allMessagesText: session.prompts.join('\n'),
+      }));
+    },
     getSession(sessionId: string): ControlledAgentSession {
       const session = sessions.get(sessionId);
 

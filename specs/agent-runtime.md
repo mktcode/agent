@@ -34,8 +34,9 @@ The module owns:
 * Persistent PI sessions stored on disk
 * At most one loaded session instance at a time
 * Triggering agent execution per turn
-* Holding the workspace lock during execution only
+* Using the workspace lock for turn execution and persisted session deletion
 * Forwarding agent events transparently
+* Listing and deleting persisted sessions
 
 It must not:
 
@@ -75,21 +76,48 @@ Creates or resumes a session and starts one turn.
 Behavior:
 
 1. If a turn is already running → throw `SessionBusyError`
-2. If `sessionId` is omitted:
+2. Acquire workspace lock via `runExclusive`
+3. If `sessionId` is omitted:
 
   * Create a new persistent PI session via SDK
   * Use the project-local session directory `./.pi/sessions`
-3. If `sessionId` is provided:
+4. If `sessionId` is provided:
 
   * Open the persisted PI session matching that ID
   * If no such session exists → throw `SessionNotFoundError`
-4. Bind agent to `./.workspace`
-5. Return the effective `sessionId` plus a completion promise to the caller before the first agent event is emitted
-6. Acquire workspace lock via `runExclusive`
+5. Bind agent to `./.workspace`
+6. Return the effective `sessionId` plus a completion promise to the caller before the first agent event is emitted
 7. Send input to agent via SDK
 8. Forward agent events during execution
 9. On completion → transition state → `ready`
 10. Release lock
+
+### `listSessions(): Promise<SessionInfo[]>`
+
+Returns metadata for all existing sessions in `./.pi/sessions`.
+
+Behavior:
+
+* Read session metadata from persistent storage
+* Return entries sorted by `sessionId` in ascending lexicographic order
+* Do not modify runtime state
+
+### `deleteSession(sessionId: string): Promise<void>`
+
+Deletes the persisted session matching `sessionId`.
+
+Behavior:
+
+1. Acquire workspace lock via `runExclusive`
+2. Resolve the persisted session matching `sessionId`
+3. If no such session exists → throw `SessionNotFoundError`
+4. If the target session is currently loaded:
+
+  * Dispose the loaded session instance
+  * Clear the loaded session slot
+  * Transition state → `idle`
+5. Delete the persisted session from `./.pi/sessions`
+6. Release lock
 
 ---
 
@@ -143,10 +171,12 @@ Each turn:
 
 ### Locking Rule
 
-> The workspace lock is held only during active execution of a turn.
+> The workspace lock is held for the full duration of a turn and for persisted session deletion.
 
-* Lock is acquired before execution
+* Lock is acquired before loading or creating the session for a turn
 * Lock is released immediately after execution completes
+* Lock is acquired before deleting a persisted session
+* Lock is released immediately after deletion completes
 
 Between turns:
 

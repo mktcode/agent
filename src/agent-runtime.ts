@@ -1,7 +1,14 @@
+import { rm } from 'node:fs/promises';
 import path from 'node:path';
 
 import { getModel, KnownProvider } from "@mariozechner/pi-ai";
-import { AuthStorage, createAgentSession, ModelRegistry, SessionManager } from '@mariozechner/pi-coding-agent';
+import {
+  AuthStorage,
+  createAgentSession,
+  ModelRegistry,
+  SessionManager,
+  type SessionInfo,
+} from '@mariozechner/pi-coding-agent';
 import {
   SessionBusyError,
   SessionNotFoundError,
@@ -35,10 +42,37 @@ export interface AgentRuntimePromptResult {
   completion: Promise<void>;
 }
 
+interface Deferred<T> {
+  promise: Promise<T>;
+  resolve(value: T | PromiseLike<T>): void;
+  reject(reason?: unknown): void;
+}
+
+export type AgentRuntimeSessionInfo = SessionInfo;
+
+export interface ListAgentRuntimeSessionsOptions {
+  workspacePath: string;
+  sessionStoragePath: string;
+}
+
+export type ListAgentRuntimeSessions = (
+  options: ListAgentRuntimeSessionsOptions,
+) => Promise<AgentRuntimeSessionInfo[]>;
+
+export interface DeletePersistedAgentRuntimeSessionOptions {
+  session: AgentRuntimeSessionInfo;
+}
+
+export type DeletePersistedAgentRuntimeSession = (
+  options: DeletePersistedAgentRuntimeSessionOptions,
+) => Promise<void>;
+
 export interface AgentRuntimeOptions {
   workspace: WorkspaceManager;
   workspacePath: string;
   createSession?: CreateAgentRuntimeSession;
+  listSessions?: ListAgentRuntimeSessions;
+  deletePersistedSession?: DeletePersistedAgentRuntimeSession;
 }
 
 export class AgentRuntime {
@@ -46,6 +80,8 @@ export class AgentRuntime {
   readonly #workspacePath: string;
   readonly #sessionStoragePath: string;
   readonly #createSession: CreateAgentRuntimeSession;
+  readonly #listSessions: ListAgentRuntimeSessions;
+  readonly #deletePersistedSession: DeletePersistedAgentRuntimeSession;
   readonly #listeners = new Set<(event: unknown) => void>();
 
   #state: AgentRuntimeState = 'idle';
@@ -58,6 +94,8 @@ export class AgentRuntime {
     this.#workspacePath = options.workspacePath;
     this.#sessionStoragePath = path.join(path.dirname(options.workspacePath), '.pi', 'sessions');
     this.#createSession = options.createSession ?? createPiAgentRuntimeSession;
+    this.#listSessions = options.listSessions ?? listPersistentSessions;
+    this.#deletePersistedSession = options.deletePersistedSession ?? deletePersistentSession;
   }
 
   public async prompt(input: string, sessionId?: string): Promise<AgentRuntimePromptResult> {
@@ -65,34 +103,37 @@ export class AgentRuntime {
       throw new SessionBusyError();
     }
 
-    const session = await this.#loadSession(sessionId);
-    this.#state = 'running';
+    const sessionReady = createDeferred<AgentRuntimeSession>();
+    let session: AgentRuntimeSession | undefined;
 
     const execution = this.#workspace.runExclusive(async () => {
-      await Promise.resolve();
+      session = await this.#loadSession(sessionId);
+      this.#state = 'running';
+      sessionReady.resolve(session);
+
+      // Yield once so prompt() can return the session id before agent events begin.
       await Promise.resolve();
       await session.prompt(input);
     });
 
     this.#execution = execution;
 
-    let immediateError: unknown;
     execution.catch((error) => {
-      immediateError = error;
+      if (session === undefined) {
+        sessionReady.reject(error);
+      }
     });
 
-    await Promise.resolve();
+    let activeSession: AgentRuntimeSession;
 
-    if (immediateError !== undefined) {
+    try {
+      activeSession = await sessionReady.promise;
+    } catch (error) {
       if (this.#execution === execution) {
         this.#execution = undefined;
       }
 
-      if (this.#session === session) {
-        this.#state = 'ready';
-      }
-
-      throw immediateError;
+      throw error;
     }
 
     const completion = execution.finally(() => {
@@ -100,15 +141,40 @@ export class AgentRuntime {
         this.#execution = undefined;
       }
 
-      if (this.#session === session) {
+      if (this.#session === activeSession) {
         this.#state = 'ready';
       }
     });
 
     return {
-      sessionId: session.sessionId,
+      sessionId: activeSession.sessionId,
       completion,
     };
+  }
+
+  public async listSessions(): Promise<AgentRuntimeSessionInfo[]> {
+    const sessions = await this.#listSessions({
+      workspacePath: this.#workspacePath,
+      sessionStoragePath: this.#sessionStoragePath,
+    });
+
+    return [...sessions].sort((left, right) => left.id.localeCompare(right.id));
+  }
+
+  public async deleteSession(sessionId: string): Promise<void> {
+    await this.#workspace.runExclusive(async () => {
+      const session = (await this.listSessions()).find((entry) => entry.id === sessionId);
+
+      if (!session) {
+        throw new SessionNotFoundError({ sessionId });
+      }
+
+      if (this.#session?.sessionId === sessionId) {
+        this.#destroySession(this.#session);
+      }
+
+      await this.#deletePersistedSession({ session });
+    });
   }
 
   public async stop(): Promise<void> {
@@ -217,6 +283,38 @@ async function createPiAgentRuntimeSession(
     abort: () => session.abort(),
     dispose: () => session.dispose(),
     subscribe: (listener: (event: unknown) => void) => session.subscribe(listener),
+  };
+}
+
+async function listPersistentSessions(
+  options: ListAgentRuntimeSessionsOptions,
+): Promise<AgentRuntimeSessionInfo[]> {
+  return SessionManager.list(options.workspacePath, options.sessionStoragePath);
+}
+
+async function deletePersistentSession(
+  options: DeletePersistedAgentRuntimeSessionOptions,
+): Promise<void> {
+  await rm(options.session.path);
+}
+
+function createDeferred<T>(): Deferred<T> {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  let reject!: (reason?: unknown) => void;
+
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+
+  return {
+    promise,
+    resolve(value: T | PromiseLike<T>): void {
+      resolve(value);
+    },
+    reject(reason?: unknown): void {
+      reject(reason);
+    },
   };
 }
 

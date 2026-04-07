@@ -230,7 +230,7 @@ Error responses before streaming starts use the standard JSON error format.
 
 If the client disconnects during execution, the active turn continues to run and finishes gracefully.
 
-### SSE response format
+#### SSE response format
 
 Each event must be sent as:
 
@@ -241,11 +241,58 @@ data: <JSON serialized event>
 
 ---
 
+#### `GET /agent/sessions`
+
+Lists sessions with metadata for all existing sessions in `.pi/sessions`.
+
+Behavior:
+
+* Calls `agentRuntime.listSessions`
+* Returns unmodified session metadata for all existing sessions in the order returned by the runtime
+
+Response:
+
+```json
+{
+  "sessions": [
+    {
+      // pi SessionInfo
+    }
+  ]
+}
+```
+
+---
+
+#### `DELETE /agent/session`
+
+Request:
+
+```json
+{
+  "sessionId": "string"
+}
+```
+
+Behavior:
+
+* Calls `agentRuntime.deleteSession`
+* Deletes the persisted session matching `sessionId`
+
+Response:
+
+```json
+{}
+```
+
+---
+
 ## Idempotency
 
 * `GET` endpoints → idempotent
 * `POST /agent/prompt` → non-idempotent
 * All other `POST` endpoints → non-idempotent
+* `DELETE` endpoints → non-idempotent
 
 ---
 
@@ -257,9 +304,10 @@ data: <JSON serialized event>
 
 ---
 
-## Agent Prompt Constraints
+## Agent Endpoint Constraints
 
-* `POST /agent/prompt` is the only agent endpoint
+* `POST /agent/prompt` is the only agent execution endpoint
+* `GET /agent/sessions` and `DELETE /agent/session` only inspect or delete persisted PI sessions
 * Session creation versus resume is handled entirely inside the agent runtime
 * The API layer treats `sessionId` as opaque input/output data
 * The API layer forwards agent events unchanged
@@ -282,6 +330,9 @@ data: <JSON serialized event>
 * Authentication enforcement
 * Input validation
 * Error mapping correctness
+* Session listing delegates directly to the runtime
+* Session deletion delegates directly to the runtime
+* Session deletion validates `sessionId` strictly
 * Endpoint-to-module delegation
 * SSE header and frame formatting for prompt requests
 * Disconnect cleanup without turn cancellation

@@ -1,13 +1,21 @@
 import Fastify, { type FastifyInstance, type FastifyRequest } from 'fastify';
 
-import { type AgentRuntime, type AgentRuntimePromptResult } from './agent-runtime';
+import {
+  type AgentRuntime,
+  type AgentRuntimePromptResult,
+  type AgentRuntimeSessionInfo,
+} from './agent-runtime';
 import { AppError, LockUnavailableError, ValidationError } from './errors';
 import { type GitService } from './git-service';
 
 export interface ApiServerOptions {
   authToken: string;
   gitService: Pick<GitService, 'listBranches' | 'checkout' | 'merge' | 'push' | 'deleteBranch'>;
-  agentRuntime: Pick<AgentRuntime, 'prompt' | 'subscribe'>;
+  agentRuntime: Pick<AgentRuntime, 'prompt' | 'listSessions' | 'deleteSession' | 'subscribe'>;
+}
+
+export interface AgentSessionsResponse {
+  sessions: AgentRuntimeSessionInfo[];
 }
 
 export interface AgentEventSource {
@@ -108,6 +116,19 @@ export function createApiServer(options: ApiServerOptions): FastifyInstance {
       sessionId,
       reply: reply as unknown as AgentPromptStreamReply,
     });
+  });
+
+  server.get('/agent/sessions', async (): Promise<AgentSessionsResponse> => {
+    const sessions = await options.agentRuntime.listSessions();
+    return { sessions };
+  });
+
+  server.delete('/agent/session', async (request, reply) => {
+    const { sessionId } = validateStringBody(request.body, ['sessionId']);
+
+    await options.agentRuntime.deleteSession(sessionId);
+
+    reply.status(200).send({});
   });
 
   return server;

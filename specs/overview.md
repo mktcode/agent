@@ -101,9 +101,10 @@ The workspace is protected by a **global mutex**.
 Mutating operations include:
 
 * Git operations
-* Agent execution (per turn)
+* Agent execution (including session create/resume for a turn)
+* Persisted PI session deletion
 
-Between agent turns, no lock is held.
+Outside active mutations, no lock is held.
 
 This guarantees that all state transitions are linear and explainable.
 
@@ -129,15 +130,20 @@ There are:
 
 ## Agent Transport
 
-Agent execution uses a single HTTP endpoint:
+Agent transport uses dedicated HTTP endpoints:
 
 * `POST /agent/prompt`
+* `GET /agent/sessions`
+* `DELETE /agent/session`
+
+Only `POST /agent/prompt` executes the agent.
 
 That request both:
 
-* selects or creates the PI session
-* executes one agent turn
+* selects or creates the PI session and executes one agent turn
 * streams live agent events back to the client via SSE
+
+The other agent endpoints only inspect or delete persisted PI sessions.
 
 ---
 
@@ -168,10 +174,10 @@ The following are explicitly out of scope:
 
 ## External Dependencies
 
-* [PI Agent README](https://raw.githubusercontent.com/badlogic/pi-mono/refs/heads/main/packages/agent/README.md?utm_source=chatgpt.com)
-* [PI Coding Agent SDK](https://raw.githubusercontent.com/badlogic/pi-mono/refs/heads/main/packages/coding-agent/docs/sdk.md?utm_source=chatgpt.com)
-* [Fastify Docs](https://fastify.dev/docs/latest/Reference/?utm_source=chatgpt.com)
-* [simple-git README](https://raw.githubusercontent.com/steveukx/git-js/refs/heads/main/simple-git/readme.md?utm_source=chatgpt.com)
+* [PI Agent README](../node_modules/@mariozechner/pi-agent-core/README.md)
+* [PI Coding Agent SDK](../node_modules/@mariozechner/pi-coding-agent/docs/sdk.md)
+* [Fastify Docs](https://fastify.dev/docs/latest/Reference/)
+* [simple-git README](https://raw.githubusercontent.com/steveukx/git-js/refs/heads/main/simple-git/readme.md)
 
 ---
 
