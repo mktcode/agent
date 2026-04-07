@@ -51,6 +51,15 @@ export class InvalidLockStateError extends AppError {
   }
 }
 
+export class PostCloneCommandError extends AppError {
+  public constructor(command: string, details?: AppErrorDetails) {
+    super('POST_CLONE_COMMAND_FAILED', `Post-clone command failed: ${command}`, {
+      command,
+      ...details,
+    });
+  }
+}
+
 export class SessionBusyError extends AppError {
   public constructor(details?: AppErrorDetails) {
     super('SESSION_BUSY', 'The agent session is already executing a turn.', details);
@@ -82,6 +91,19 @@ export class DirtyWorkingTreeError extends GitOperationError {
 export class InvalidBranchNameError extends GitOperationError {
   public constructor(branch: string, cause?: unknown) {
     super('INVALID_BRANCH_NAME', `Invalid branch name: ${branch}`, withCause({ branch }, cause));
+  }
+}
+
+export class CurrentBranchMismatchError extends GitOperationError {
+  public constructor(expectedBranch: string, currentBranch: string) {
+    super(
+      'CURRENT_BRANCH_MISMATCH',
+      `Requested branch ${expectedBranch} is not the currently checked out branch ${currentBranch}.`,
+      {
+        expectedBranch,
+        currentBranch,
+      },
+    );
   }
 }
 

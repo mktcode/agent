@@ -12,6 +12,7 @@ import { WorkspaceManager } from './workspace';
 export interface ServerConfig {
   authToken: string;
   repoUrl: string;
+  postCloneCommand?: string;
   workspacePath: string;
   host: string;
   port: number;
@@ -23,12 +24,14 @@ export function readServerConfig(
 ): ServerConfig {
   const authToken = readRequiredEnv(env.AUTH_TOKEN, 'AUTH_TOKEN');
   const repoUrl = readRequiredEnv(env.REPO_URL, 'REPO_URL');
+  const postCloneCommand = readOptionalEnv(env.POST_CLONE_COMMAND);
   const host = env.HOST ?? '127.0.0.1';
   const port = readPort(env.PORT);
 
   return {
     authToken,
     repoUrl,
+    postCloneCommand,
     workspacePath: path.join(cwd, '.workspace'),
     host,
     port,
@@ -37,6 +40,7 @@ export function readServerConfig(
 
 export async function buildServer(config: ServerConfig): Promise<FastifyInstance> {
   const workspace = new WorkspaceManager({
+    postCloneCommand: config.postCloneCommand,
     repoUrl: config.repoUrl,
     workspacePath: config.workspacePath,
   });
@@ -53,7 +57,7 @@ export async function buildServer(config: ServerConfig): Promise<FastifyInstance
 
   return createApiServer({
     authToken: config.authToken,
-    gitService,
+    gitService: createLockedGitService(workspace, gitService),
     agentRuntime,
   });
 }
@@ -86,6 +90,14 @@ export async function main(): Promise<void> {
 function readRequiredEnv(value: string | undefined, name: 'AUTH_TOKEN' | 'REPO_URL'): string {
   if (typeof value !== 'string' || value.length === 0) {
     throw new ValidationError(`${name} is required.`);
+  }
+
+  return value;
+}
+
+function readOptionalEnv(value: string | undefined): string | undefined {
+  if (typeof value !== 'string' || value.length === 0) {
+    return undefined;
   }
 
   return value;
@@ -125,4 +137,16 @@ if (isMainModule()) {
 
     process.exitCode = 1;
   });
+}
+
+function createLockedGitService(workspace: WorkspaceManager, gitService: GitService): Pick<GitService, 'getStatus' | 'listBranches' | 'checkout' | 'merge' | 'push' | 'revert' | 'deleteBranch'> {
+  return {
+    getStatus: () => gitService.getStatus(),
+    listBranches: () => gitService.listBranches(),
+    checkout: (branch: string) => workspace.runExclusive(() => gitService.checkout(branch)),
+    merge: (source: string, target: string) => workspace.runExclusive(() => gitService.merge(source, target)),
+    push: (branch: string, commitMessage: string) => workspace.runExclusive(() => gitService.push(branch, commitMessage)),
+    revert: () => workspace.runExclusive(() => gitService.revert()),
+    deleteBranch: (branch: string) => workspace.runExclusive(() => gitService.deleteBranch(branch)),
+  };
 }

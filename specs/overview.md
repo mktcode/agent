@@ -81,6 +81,7 @@ All implementation details are defined in these documents.
 On server startup:
 
 * If `./.workspace` does not exist → clone `REPO_URL` into it
+* After a fresh clone, if `POST_CLONE_COMMAND` is configured → execute it inside `./.workspace`
 * If it exists → assume it is valid
 
 No validation, repair, or synchronization is performed.

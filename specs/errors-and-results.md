@@ -62,6 +62,7 @@ All modules must throw only:
 * `ValidationError`
 * `LockUnavailableError`
 * `InvalidLockStateError`
+* `PostCloneCommandError`
 
 ### Agent Errors
 
@@ -73,6 +74,7 @@ All modules must throw only:
 * `GitOperationError`
 * `DirtyWorkingTreeError`
 * `InvalidBranchNameError`
+* `CurrentBranchMismatchError`
 * `ActiveBranchDeletionError`
 * `UpstreamNotConfiguredError`
 * `DetachedHeadError`

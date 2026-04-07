@@ -37,10 +37,26 @@ describe('readServerConfig', () => {
     expect(config).toEqual({
       authToken: 'secret-token',
       repoUrl: '/tmp/repository.git',
+      postCloneCommand: undefined,
       workspacePath: path.join(cwd, '.workspace'),
       host: '127.0.0.1',
       port: 3000,
     });
+  });
+
+  it('reads an optional POST_CLONE_COMMAND', () => {
+    const cwd = '/tmp/nextagent';
+
+    const config = readServerConfig(
+      {
+        AUTH_TOKEN: 'secret-token',
+        REPO_URL: '/tmp/repository.git',
+        POST_CLONE_COMMAND: 'npm install',
+      },
+      cwd,
+    );
+
+    expect(config.postCloneCommand).toBe('npm install');
   });
 
   it('rejects missing AUTH_TOKEN', () => {

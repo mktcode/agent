@@ -2,6 +2,8 @@ import { simpleGit, type SimpleGit } from 'simple-git';
 
 import {
   ActiveBranchDeletionError,
+  type AppErrorDetails,
+  CurrentBranchMismatchError,
   DetachedHeadError,
   DirtyWorkingTreeError,
   GitOperationError,
@@ -12,6 +14,7 @@ import {
 
 export {
   ActiveBranchDeletionError,
+  CurrentBranchMismatchError,
   DetachedHeadError,
   DirtyWorkingTreeError,
   GitOperationError as GitServiceError,
@@ -40,6 +43,20 @@ export class GitService {
       throw new GitOperationError('LIST_BRANCHES_FAILED', 'Failed to list local branches.', {
         cause: toErrorDetails(error),
       });
+    }
+  }
+
+  public async getStatus(): Promise<{ branch: string; hasUncommittedChanges: boolean }> {
+    try {
+      const branch = await this.#getCurrentBranch();
+      const status = await this.#git.status();
+
+      return {
+        branch,
+        hasUncommittedChanges: !status.isClean(),
+      };
+    } catch (error) {
+      throw this.#wrapUnexpectedError('STATUS_FAILED', 'Failed to read repository status.', error);
     }
   }
 
@@ -133,16 +150,55 @@ export class GitService {
     }
   }
 
-  public async push(branch: string): Promise<void> {
-    await this.#validateBranchName(branch);
-    await this.#assertCleanWorkingTree();
-    await this.#assertUpstreamConfiguration(branch);
+  public async revert(): Promise<void> {
+    const currentBranch = await this.#assertCurrentBranch();
+    const status = await this.#git.status();
+
+    if (status.isClean()) {
+      return;
+    }
 
     try {
-      await this.#git.push('origin', `${branch}:${branch}`);
-      await this.#assertCurrentBranch();
+      await this.#git.raw(['reset', '--hard', 'HEAD']);
+      await this.#git.raw(['clean', '-fd']);
+
+      const finalStatus = await this.#git.status();
+
+      if (!finalStatus.isClean()) {
+        throw new GitOperationError('REVERT_FAILED', 'Failed to revert uncommitted changes.', {
+          status: {
+            current: finalStatus.current,
+            files: finalStatus.files,
+          },
+        });
+      }
+
+      await this.#assertCurrentBranch(currentBranch);
     } catch (error) {
-      throw this.#wrapUnexpectedError('PUSH_FAILED', `Failed to push branch ${branch}.`, error);
+      throw this.#wrapUnexpectedError('REVERT_FAILED', 'Failed to revert uncommitted changes.', error);
+    }
+  }
+
+  public async push(branch: string, commitMessage: string): Promise<void> {
+    await this.#validateBranchName(branch);
+    await this.#assertCurrentBranch(branch);
+    await this.#assertUpstreamConfiguration(branch);
+
+    let createdCommit = false;
+
+    const status = await this.#git.status();
+
+    try {
+      if (!status.isClean()) {
+        await this.#git.add(['--all']);
+        await this.#git.commit(commitMessage);
+        createdCommit = true;
+      }
+
+      await this.#git.push('origin', `${branch}:${branch}`);
+      await this.#assertCurrentBranch(branch);
+    } catch (error) {
+      throw this.#wrapPushError(branch, error, createdCommit ? 'push' : 'commit', createdCommit);
     }
   }
 
@@ -176,7 +232,7 @@ export class GitService {
     const currentBranch = await this.#getCurrentBranch();
 
     if (expectedBranch !== undefined && currentBranch !== expectedBranch) {
-      throw new DetachedHeadError();
+      throw new CurrentBranchMismatchError(expectedBranch, currentBranch);
     }
 
     return currentBranch;
@@ -218,5 +274,56 @@ export class GitService {
     return new GitOperationError(code, message, {
       cause: toErrorDetails(error),
     });
+  }
+
+  #wrapPushError(
+    branch: string,
+    error: unknown,
+    stage: 'commit' | 'push',
+    createdCommit: boolean,
+  ): GitOperationError {
+    if (error instanceof GitOperationError) {
+      return error;
+    }
+
+    return new GitOperationError('PUSH_FAILED', `Failed to push branch ${branch}.`, {
+      createdCommit,
+      stage,
+      ...this.#extractGitOutput(error),
+      cause: toErrorDetails(error),
+    });
+  }
+
+  #extractGitOutput(error: unknown): AppErrorDetails {
+    if (!(error instanceof Error)) {
+      return {};
+    }
+
+    const details: AppErrorDetails = {};
+    const errorWithOutput = error as Error & {
+      stderr?: string;
+      stdout?: string;
+      git?: {
+        stderr?: string;
+        stdout?: string;
+      };
+    };
+
+    const stdout = errorWithOutput.stdout ?? errorWithOutput.git?.stdout;
+    const stderr = errorWithOutput.stderr ?? errorWithOutput.git?.stderr;
+
+    if (stdout !== undefined && stdout.length > 0) {
+      details.stdout = stdout.trimEnd();
+    }
+
+    if (stderr !== undefined && stderr.length > 0) {
+      details.stderr = stderr.trimEnd();
+    }
+
+    if (Object.keys(details).length === 0 && error.message.length > 0) {
+      details.message = error.message;
+    }
+
+    return details;
   }
 }

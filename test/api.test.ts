@@ -12,10 +12,12 @@ import {
 import { ControlledEventSource, assertEventSequence, createDeferred, createReply } from './harness';
 
 interface GitServiceStub {
+  getStatus: ReturnType<typeof vi.fn>;
   listBranches: ReturnType<typeof vi.fn>;
   checkout: ReturnType<typeof vi.fn>;
   merge: ReturnType<typeof vi.fn>;
   push: ReturnType<typeof vi.fn>;
+  revert: ReturnType<typeof vi.fn>;
   deleteBranch: ReturnType<typeof vi.fn>;
 }
 
@@ -50,10 +52,12 @@ afterEach(async () => {
 
 function createServer() {
   const gitService: GitServiceStub = {
+    getStatus: vi.fn(async () => ({ branch: 'main', hasUncommittedChanges: false })),
     listBranches: vi.fn(async () => ['feature', 'main']),
     checkout: vi.fn(async () => undefined),
     merge: vi.fn(async () => undefined),
     push: vi.fn(async () => undefined),
+    revert: vi.fn(async () => undefined),
     deleteBranch: vi.fn(async () => undefined),
   };
   const agentRuntime: AgentRuntimeStub = {
@@ -167,7 +171,32 @@ describe('API validation', () => {
         code: 'VALIDATION_ERROR',
         message: 'Invalid request body.',
         details: {
-          issues: ['branch must be a string', 'Unexpected field: extra'],
+          issues: ['branch must be a string', 'commitMessage must be a string', 'Unexpected field: extra'],
+        },
+      },
+    });
+    expect(gitService.push).not.toHaveBeenCalled();
+  });
+
+  it('requires a commit message for push requests', async () => {
+    const { server, gitService } = createServer();
+
+    const response = await server.inject({
+      method: 'POST',
+      url: '/git/push',
+      headers: authorizedHeaders(),
+      payload: {
+        branch: 'main',
+      },
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toEqual({
+      error: {
+        code: 'VALIDATION_ERROR',
+        message: 'Invalid request body.',
+        details: {
+          issues: ['commitMessage must be a string'],
         },
       },
     });
@@ -216,6 +245,23 @@ describe('API validation', () => {
 });
 
 describe('API delegation', () => {
+  it('delegates repository status directly to the git module', async () => {
+    const { server, gitService } = createServer();
+
+    const response = await server.inject({
+      method: 'GET',
+      url: '/git/status',
+      headers: authorizedHeaders(),
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({
+      branch: 'main',
+      hasUncommittedChanges: false,
+    });
+    expect(gitService.getStatus).toHaveBeenCalledTimes(1);
+  });
+
   it('delegates branch listing directly to the git module', async () => {
     const { server, gitService } = createServer();
 
@@ -249,6 +295,39 @@ describe('API delegation', () => {
     expect(response.json()).toEqual({});
     expect(gitService.merge).toHaveBeenCalledTimes(1);
     expect(gitService.merge).toHaveBeenCalledWith('feature', 'main');
+  });
+
+  it('delegates push with commit message directly to the git module', async () => {
+    const { server, gitService } = createServer();
+
+    const response = await server.inject({
+      method: 'POST',
+      url: '/git/push',
+      headers: authorizedHeaders(),
+      payload: {
+        branch: 'main',
+        commitMessage: 'Agent commit',
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({});
+    expect(gitService.push).toHaveBeenCalledWith('main', 'Agent commit');
+  });
+
+  it('delegates revert directly to the git module', async () => {
+    const { server, gitService } = createServer();
+
+    const response = await server.inject({
+      method: 'POST',
+      url: '/git/revert',
+      headers: authorizedHeaders(),
+      payload: {},
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({});
+    expect(gitService.revert).toHaveBeenCalledTimes(1);
   });
 
   it('delegates agent prompts directly to the runtime and returns SSE headers', async () => {
@@ -532,6 +611,7 @@ describe('API error mapping', () => {
       headers: authorizedHeaders(),
       payload: {
         branch: 'main',
+        commitMessage: 'Agent commit',
       },
     });
 

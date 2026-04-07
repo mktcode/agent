@@ -16,7 +16,8 @@ It is the **foundation of determinism** in the system. All higher-level modules 
 The module provides:
 
 1. Workspace initialization
-2. Exclusive access control via a global lock
+2. One-time post-clone command execution
+3. Exclusive access control via a global lock
 
 It must not contain any git logic, agent logic, or API concerns.
 
@@ -27,10 +28,13 @@ It must not contain any git logic, agent logic, or API concerns.
 On server startup:
 
 * If `./.workspace` does not exist → clone `REPO_URL` into it
+* After a fresh clone, if `POST_CLONE_COMMAND` is configured → execute it inside `./.workspace`
 * If it exists → do nothing
 
 Constraints:
 
+* The post-clone command runs only after a fresh clone, never on an existing workspace
+* The post-clone command runs with `./.workspace` as its working directory
 * No validation of repository state
 * No pulling, resetting, or cleaning
 * No retries
@@ -38,6 +42,8 @@ Constraints:
 Failure behavior:
 
 * If cloning fails → the process must fail to start
+* If the post-clone command exits non-zero → initialization must fail and the process must fail to start
+* Post-clone command failure must preserve available command output for diagnostics
 
 The workspace is persistent across restarts.
 
@@ -166,6 +172,7 @@ Errors must be explicit and deterministic.
 * No scheduling or queuing
 * No lock expiration
 * No cross-process coordination
+* No recurring environment setup after startup
 
 ---
 

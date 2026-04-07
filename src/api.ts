@@ -10,7 +10,7 @@ import { type GitService } from './git-service';
 
 export interface ApiServerOptions {
   authToken: string;
-  gitService: Pick<GitService, 'listBranches' | 'checkout' | 'merge' | 'push' | 'deleteBranch'>;
+  gitService: Pick<GitService, 'getStatus' | 'listBranches' | 'checkout' | 'merge' | 'push' | 'revert' | 'deleteBranch'>;
   agentRuntime: Pick<AgentRuntime, 'prompt' | 'listSessions' | 'deleteSession' | 'subscribe'>;
 }
 
@@ -75,6 +75,10 @@ export function createApiServer(options: ApiServerOptions): FastifyInstance {
     return { branches };
   });
 
+  server.get('/git/status', async () => {
+    return options.gitService.getStatus();
+  });
+
   server.post('/git/checkout', async (request, reply) => {
     const { branch } = validateStringBody(request.body, ['branch']);
 
@@ -92,9 +96,17 @@ export function createApiServer(options: ApiServerOptions): FastifyInstance {
   });
 
   server.post('/git/push', async (request, reply) => {
-    const { branch } = validateStringBody(request.body, ['branch']);
+    const { branch, commitMessage } = validateStringBody(request.body, ['branch', 'commitMessage']);
 
-    await options.gitService.push(branch);
+    await options.gitService.push(branch, commitMessage);
+
+    reply.status(200).send({});
+  });
+
+  server.post('/git/revert', async (request, reply) => {
+    validateEmptyBody(request.body);
+
+    await options.gitService.revert();
 
     reply.status(200).send({});
   });
@@ -179,6 +191,26 @@ function validateStringBody(
   }
 
   return body as StringBodyShape;
+}
+
+function validateEmptyBody(body: unknown): void {
+  if (body === undefined) {
+    return;
+  }
+
+  if (!isRecord(body)) {
+    throw new ValidationError('Invalid request body.', {
+      issues: ['Request body must be an object'],
+    });
+  }
+
+  const keys = Object.keys(body);
+
+  if (keys.length > 0) {
+    throw new ValidationError('Invalid request body.', {
+      issues: keys.map((key) => `Unexpected field: ${key}`),
+    });
+  }
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

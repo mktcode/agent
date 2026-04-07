@@ -23,6 +23,7 @@ Optional:
 - `PORT`: defaults to `3000`
 - `MODEL_PROVIDER`: defaults to `openai` ([Pi docs](https://github.com/badlogic/pi-mono/blob/main/packages/coding-agent/docs/providers.md))
 - `MODEL_NAME`: defaults to `gpt-5.4-mini`
+- `POST_CLONE_COMMAND`: optional shell command to run after cloning the repository (e.g. for installing dependencies and setting up git hooks)
 
 Example:
 
@@ -33,6 +34,7 @@ HOST=127.0.0.1
 PORT=3000
 MODEL_PROVIDER=anthropic
 MODEL_NAME=claude-opus-4-6
+POST_CLONE_COMMAND=npm install && npm run prepare
 ```
 
 ## Start
@@ -49,7 +51,7 @@ HOST=127.0.0.1 PORT=3000 AUTH_TOKEN=secret-token REPO_URL=/absolute/path/to/repo
 npm run dev
 ```
 
-On first startup, the server clones `REPO_URL` into `.workspace` in the project root. If `.workspace` already exists, it is reused as-is.
+On first startup, the server clones `REPO_URL` into `.workspace` in the project root. If `POST_CLONE_COMMAND` is set, it runs once after that fresh clone inside `.workspace`. If `.workspace` already exists, it is reused as-is and the post-clone command is not run again.
 
 PI agent sessions are stored separately in `.pi/sessions` in the project root.
 
@@ -65,6 +67,13 @@ List branches:
 
 ```bash
 curl http://127.0.0.1:3000/git/branches \
+  -H 'Authorization: Bearer secret-token'
+```
+
+Get the current branch and whether the workspace has uncommitted changes:
+
+```bash
+curl http://127.0.0.1:3000/git/status \
   -H 'Authorization: Bearer secret-token'
 ```
 
@@ -92,7 +101,18 @@ Push a branch:
 curl -X POST http://127.0.0.1:3000/git/push \
   -H 'Authorization: Bearer secret-token' \
   -H 'Content-Type: application/json' \
-  -d '{"branch":"main"}'
+  -d '{"branch":"main","commitMessage":"Agent commit"}'
+```
+
+If `.workspace` contains uncommitted changes, `POST /git/push` stages and commits them before pushing. When commit or push fails, the JSON error response includes structured details that contain the failed stage and available command output.
+
+Discard all uncommitted changes:
+
+```bash
+curl -X POST http://127.0.0.1:3000/git/revert \
+  -H 'Authorization: Bearer secret-token' \
+  -H 'Content-Type: application/json' \
+  -d '{}'
 ```
 
 Delete a branch:

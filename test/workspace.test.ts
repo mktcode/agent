@@ -11,6 +11,7 @@ import {
 import {
   InvalidLockStateError,
   LockUnavailableError,
+  PostCloneCommandError,
   WorkspaceManager,
 } from '../src/workspace';
 
@@ -173,5 +174,39 @@ describe('WorkspaceManager.initialize', () => {
 
     await expect(readFile(path.join(workspacePath, 'marker.txt'), 'utf8')).resolves.toBe('keep');
     await expect(readFile(path.join(workspacePath, repository.filePath), 'utf8')).rejects.toThrow();
+  });
+
+  it('runs the post-clone command after a fresh clone', async () => {
+    const repository = await createGitRepository(cleanup);
+
+    const workspacePath = await createTempWorkspacePath(cleanup);
+    const manager = new WorkspaceManager({
+      repoUrl: repository.repoPath,
+      workspacePath,
+      postCloneCommand: 'printf setup > post-clone.txt',
+    });
+
+    await manager.initialize();
+
+    await expect(readFile(path.join(workspacePath, 'post-clone.txt'), 'utf8')).resolves.toBe('setup');
+  });
+
+  it('fails when the post-clone command exits non-zero and preserves output', async () => {
+    const repository = await createGitRepository(cleanup);
+
+    const workspacePath = await createTempWorkspacePath(cleanup);
+    const manager = new WorkspaceManager({
+      repoUrl: repository.repoPath,
+      workspacePath,
+      postCloneCommand: 'printf fail-out && printf fail-err >&2 && exit 9',
+    });
+
+    await expect(manager.initialize()).rejects.toEqual(
+      new PostCloneCommandError('printf fail-out && printf fail-err >&2 && exit 9', {
+        exitCode: 9,
+        stderr: 'fail-err',
+        stdout: 'fail-out',
+      }),
+    );
   });
 });

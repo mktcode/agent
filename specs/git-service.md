@@ -19,9 +19,11 @@ It operates purely on the filesystem using `simple-git`.
 The module exposes a small, explicit set of operations:
 
 * Listing branches
+* Reporting repository status
 * Checking out branches
 * Merging branches
 * Deleting branches
+* Reverting uncommitted changes
 * Pushing branches
 
 Each operation must be **atomic, predictable, and side-effect minimal**.
@@ -55,6 +57,17 @@ Constraints:
 
 * Must return normalized branch names only
 * Must not include formatting (no `*`, no prefixes)
+
+---
+
+### `getStatus(): Promise<{ branch: string, hasUncommittedChanges: boolean }>`
+
+Returns the current checked out branch plus whether the working tree contains any uncommitted changes.
+
+Constraints:
+
+* Must treat staged, unstaged, and untracked files as uncommitted changes
+* Must fail if the repository is in detached HEAD state
 
 ---
 
@@ -115,10 +128,35 @@ Failure conditions:
 
 ---
 
-### `push(branch: string): Promise<void>`
+### `revert(): Promise<void>`
 
 Behavior:
 
+* Discards all uncommitted changes in the current working tree
+
+Constraints:
+
+* Must reset staged and unstaged tracked changes to `HEAD`
+* Must remove untracked files and directories
+* If the working tree is already clean → no-op
+* Must not modify commit history
+
+Failure conditions:
+
+* Repository is in detached HEAD state
+* Underlying git failure
+
+---
+
+### `push(branch: string, commitMessage: string): Promise<void>`
+
+Behavior:
+
+* Ensure `branch` is the currently checked out branch
+* If the working tree contains uncommitted changes:
+
+	1. Stage all changes
+	2. Create a single commit using `commitMessage`
 * Push branch to `origin`
 
 Constraints:
@@ -126,9 +164,14 @@ Constraints:
 * Must push exactly `branch` → `origin/branch`
 * No force push
 * No implicit upstream configuration
+* Must not create an empty commit when the working tree is already clean
+* Must not amend, squash, or split commits
+* If a commit is created and the subsequent push fails, the created commit must remain in local history
 
 Failure conditions:
 
+* Requested branch is not currently checked out
+* Commit fails, including git hook failures
 * Remote rejects push
 * Upstream not configured (must fail, not auto-create)
 
@@ -136,7 +179,7 @@ Failure conditions:
 
 ## Working Tree Requirements
 
-Before any mutating operation (`checkout`, `merge`, `deleteBranch`, `push`):
+Before `checkout`, `merge`, or `deleteBranch`:
 
 * Working directory must be clean
 
@@ -153,8 +196,9 @@ If not clean:
 Explicitly disallowed:
 
 * Auto-stashing
-* Auto-committing
 * Resetting changes
+
+`push` and `revert` define their own working-tree handling and are the only exceptions to this rule.
 
 ---
 
@@ -191,6 +235,12 @@ After every operation:
 * No fallback behavior
 
 Errors should reflect the underlying git failure but remain structured and predictable.
+
+For `push` failures after an attempted auto-commit, the thrown `GitOperationError` must include structured details with:
+
+* `stage`: `commit` or `push`
+* `createdCommit`: boolean
+* Available command output (`stdout`, `stderr`, and/or message)
 
 ---
 
@@ -240,6 +290,18 @@ Tests must use a real git repository (no mocks).
 
 * Push to a local test remote
 * Push without upstream → fails
+* Push on a dirty working tree creates one commit before pushing
+* Push fails when the requested branch is not currently checked out
+* Commit hook failure during push surfaces structured output and does not discard changes
+
+**Status**
+
+* Status returns the current branch and whether uncommitted changes exist
+
+**Revert**
+
+* Revert discards staged, unstaged, and untracked changes
+* Revert on a clean working tree is a no-op
 
 ---
 

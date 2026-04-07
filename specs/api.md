@@ -86,6 +86,21 @@ Invalid input → immediate `400` response
 
 ### Git
 
+#### `GET /git/status`
+
+Returns the current checked out branch plus whether uncommitted changes exist.
+
+Response:
+
+```json
+{
+  "branch": "main",
+  "hasUncommittedChanges": true
+}
+```
+
+---
+
 #### `GET /git/branches`
 
 Returns all local branches.
@@ -121,7 +136,6 @@ Response:
 ```
 
 ---
-
 #### `POST /git/merge`
 
 Request:
@@ -151,13 +165,31 @@ Request:
 
 ```json
 {
-  "branch": "string"
+  "branch": "string",
+  "commitMessage": "string"
 }
 ```
 
 Behavior:
 
 * Calls `gitService.push`
+* If `gitService.push` fails during commit or push, the standard error response must include the structured output returned by the module in `error.details`
+
+Response:
+
+```json
+{}
+```
+
+---
+
+#### `POST /git/revert`
+
+Discards all uncommitted changes in the current working tree.
+
+Behavior:
+
+* Calls `gitService.revert`
 
 Response:
 
