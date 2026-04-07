@@ -87,7 +87,12 @@ Behavior:
 
   * Open the persisted PI session matching that ID
   * If no such session exists → throw `SessionNotFoundError`
-5. Bind agent to `./.workspace`
+5. Bind agent to `./.workspace` and configure PI resource discovery to be project-local only:
+
+  * `./.workspace` is the agent working directory
+  * `./.pi` is the only agent resource/config directory
+  * PI-managed resources may be loaded only from `./.workspace` and `./.pi`
+  * PI-managed resources must not be loaded from parent directories, the user's home directory, or any other filesystem location
 6. Return the effective `sessionId` plus a completion promise to the caller before the first agent event is emitted
 7. Send input to agent via SDK
 8. Forward agent events during execution
@@ -241,10 +246,22 @@ Between turns:
 The agent must execute with:
 
 * `./.workspace` as its working directory
+* `./.pi` as its only PI resource/config directory
 
-This ensures all file and tool operations are properly scoped.
+This ensures all file operations, tool operations, session persistence, and PI resource discovery are properly scoped.
 
-Access outside this directory is not allowed.
+PI-managed resources include at least:
+
+* context files such as `AGENTS.md`
+* skills
+* prompt templates
+* themes
+* extensions
+* PI settings and related resource-loader inputs
+
+The runtime must configure PI so those resources are discoverable only from `./.workspace` and `./.pi`.
+
+Access outside these directories is not allowed.
 
 ---
 
